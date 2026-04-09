@@ -513,6 +513,12 @@ def detect_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
     # Fallback to rolling window if no swing found
     win_mnq = mnq_a.iloc[-(lookback + 1):-1]
     win_mes = mes_a.iloc[-(lookback + 1):-1]
+
+    mnq_rl_low_t  = win_mnq["low"].idxmin()
+    mnq_rl_high_t = win_mnq["high"].idxmax()
+    mes_rl_low_t  = win_mes["low"].idxmin()
+    mes_rl_high_t = win_mes["high"].idxmax()
+
     ref_mnq_low  = mnq_sl if mnq_sl is not None else float(win_mnq["low"].min())
     ref_mnq_high = mnq_sh if mnq_sh is not None else float(win_mnq["high"].max())
     ref_mes_low  = mes_sl if mes_sl is not None else float(win_mes["low"].min())
@@ -525,10 +531,10 @@ def detect_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
             return t.strftime("%H:%M")
         return t.strftime("%d/%m %H:%M")
 
-    mnq_sl_label = f"swing low @{_fmt_t(mnq_sl_t)}" if mnq_sl is not None else "rolling low"
-    mnq_sh_label = f"swing high @{_fmt_t(mnq_sh_t)}" if mnq_sh is not None else "rolling high"
-    mes_sl_label = f"swing low @{_fmt_t(mes_sl_t)}" if mes_sl is not None else "rolling low"
-    mes_sh_label = f"swing high @{_fmt_t(mes_sh_t)}" if mes_sh is not None else "rolling high"
+    mnq_sl_label = f"swing low @{_fmt_t(mnq_sl_t)}"   if mnq_sl is not None else f"rolling low @{_fmt_t(mnq_rl_low_t)}"
+    mnq_sh_label = f"swing high @{_fmt_t(mnq_sh_t)}"  if mnq_sh is not None else f"rolling high @{_fmt_t(mnq_rl_high_t)}"
+    mes_sl_label = f"swing low @{_fmt_t(mes_sl_t)}"   if mes_sl is not None else f"rolling low @{_fmt_t(mes_rl_low_t)}"
+    mes_sh_label = f"swing high @{_fmt_t(mes_sh_t)}"  if mes_sh is not None else f"rolling high @{_fmt_t(mes_rl_high_t)}"
 
     # ICT definition: one index makes ANY new extreme beyond the reference;
     # the other stays within the reference.
