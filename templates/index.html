@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ICT SMT Dashboard — MNQ · MES</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+  body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', system-ui, sans-serif; }
+
+  /* ── top bar ── */
+  .topbar { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 20px; }
+  .topbar h5 { margin: 0; font-size: 1rem; letter-spacing: .05em; color: #58a6ff; }
+  .badge-tf { background: #1f6feb; font-size: .7rem; }
+
+  /* ── controls ── */
+  #controls { background: #161b22; border-bottom: 1px solid #30363d; padding: 8px 16px; gap: 8px; }
+  .btn-hour { min-width: 54px; font-size: .78rem; padding: 3px 8px; }
+  .btn-hour.active { background: #1f6feb; border-color: #1f6feb; }
+  #live-badge { display:none; animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ── chart area ── */
+  .chart-wrap { background: #161b22; border-radius: 6px; border: 1px solid #30363d; overflow: hidden; }
+  .chart-label { font-size: .7rem; color: #8b949e; padding: 4px 10px; background: #0d1117; border-bottom: 1px solid #21262d; }
+
+  /* ── tables ── */
+  .tbl-card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }
+  .tbl-card .card-header { background: #21262d; font-size: .8rem; color: #8b949e; border-bottom: 1px solid #30363d; padding: 6px 12px; }
+  table { font-size: .82rem; }
+  td, th { padding: 4px 10px !important; }
+  th { color: #8b949e; font-weight: 500; }
+  .lbl-PDH, .lbl-PDL { color: #f0883e; }
+  .lbl-PWH, .lbl-PWL { color: #bc8cff; }
+  .lbl-HOD, .lbl-LOD { color: #ffa657; }
+  .lbl-TDO { color: #8b949e; }
+  .lbl-TWO { color: #26c6da; }
+  .lbl-NYO { color: #58a6ff; }
+  .lbl-Q1H,.lbl-Q1L,.lbl-Q2H,.lbl-Q2L,.lbl-Q3H,.lbl-Q3L,.lbl-Q4H,.lbl-Q4L { color: #7ee787; }
+  .smt-long  { color: #3fb950; }
+  .smt-short { color: #f85149; }
+  .fvg-bull  { color: #3fb950; }
+  .fvg-bear  { color: #f85149; }
+  .tag-current { background:#1f6feb22; border-radius:3px; }
+  .tag-future  { color:#8b949e; }
+
+  /* ── recommendation panel ── */
+  #rec-panel { background: #161b22; border: 1px solid #30363d; border-radius: 6px; }
+  #rec-panel .card-header { background: #21262d; font-size: .8rem; color: #8b949e; border-bottom: 1px solid #30363d; padding: 6px 12px; }
+  .rec-action-long  { background: #1a4a2e; border: 1.5px solid #3fb950; color: #3fb950; border-radius: 6px; padding: 4px 18px; font-weight: 700; font-size: 1.4rem; letter-spacing: .08em; }
+  .rec-action-short { background: #4a1a1a; border: 1.5px solid #f85149; color: #f85149; border-radius: 6px; padding: 4px 18px; font-weight: 700; font-size: 1.4rem; letter-spacing: .08em; }
+  .rec-action-wait  { background: #2a2a1a; border: 1.5px solid #ffa657; color: #ffa657; border-radius: 6px; padding: 4px 18px; font-weight: 700; font-size: 1.4rem; letter-spacing: .08em; }
+  .rec-strength-strong   { color: #3fb950; font-size: .8rem; font-weight: 600; }
+  .rec-strength-moderate { color: #ffa657; font-size: .8rem; font-weight: 600; }
+  .rec-score-bar { height: 8px; border-radius: 4px; background: #21262d; overflow: hidden; }
+  .rec-score-fill-pos  { height:100%; background: #3fb950; border-radius: 4px; transition: width .3s; }
+  .rec-score-fill-neg  { height:100%; background: #f85149; border-radius: 4px; transition: width .3s; }
+  .rec-score-fill-neu  { height:100%; background: #ffa657; border-radius: 4px; transition: width .3s; }
+  .rec-reason { font-size: .72rem; color: #8b949e; }
+  .rec-reason.pos { color: #3fb950; }
+  .rec-reason.neg { color: #f85149; }
+
+  /* ── SMT alert box ── */
+  #smt-alert-box.long-alert  { background:#0d2818; border-color:#3fb950; }
+  #smt-alert-box.short-alert { background:#2a0d0d; border-color:#f85149; }
+  #smt-alert-box.long-alert  #smt-alert-title { color:#3fb950; }
+  #smt-alert-box.short-alert #smt-alert-title { color:#f85149; }
+  #smt-alert-body .lbl { color:#8b949e; font-size:.68rem; }
+  #smt-alert-body .val { color:#e6edf3; font-weight:600; }
+  #smt-alert-body .val.swept { color:#ffa657; }
+
+  /* ── status bar ── */
+  #statusbar { font-size:.72rem; color:#8b949e; padding:4px 16px; background:#0d1117; border-top:1px solid #21262d; flex-shrink:0; }
+
+  /* ── full-page layout ── */
+  html, body { height:100%; overflow:hidden; }
+  body { display:flex; flex-direction:column; }
+  .topbar { flex-shrink:0; }
+  #controls { flex-shrink:0; }
+  .main-content { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; padding-top:6px; padding-bottom:4px; }
+  .charts-row { flex:0 0 auto; }
+  .data-row { flex:1; min-height:0; overflow:hidden; }
+  .data-row > [class*="col-"] { height:100%; }
+  .data-row .tbl-card { height:100%; overflow:hidden; display:flex; flex-direction:column; }
+  .data-row .tbl-card.mb-3 { height:auto; flex:none; max-height:48%; }
+  .data-row .table-responsive { overflow-y:auto; flex:1; min-height:0; }
+
+  /* ── compact tables ── */
+  table { font-size: .72rem; }
+  td, th { padding: 2px 6px !important; }
+  .tbl-card .card-header { padding: 3px 10px; font-size: .72rem; }
+  #statusbar .ok  { color:#3fb950; }
+  #statusbar .err { color:#f85149; }
+
+  /* ── CSS crosshair overlay (synced across charts) ── */
+  .chart-xhair {
+    display: none; position: absolute; top: 0; width: 1px;
+    background: rgba(88,166,255,0.5); pointer-events: none; z-index: 10;
+  }
+
+  /* ── hover info bar (below each chart) ── */
+  .chart-hover-info {
+    background: #0d1117; border-top: 1px solid #21262d;
+    padding: 2px 10px; font-size: .72rem; font-family: monospace;
+    color: #8b949e; display: flex; gap: 14px; align-items: center;
+    min-height: 20px; flex-wrap: nowrap; overflow: hidden;
+  }
+
+  /* ── spinner overlay ── */
+  #overlay { display:none; position:fixed; inset:0; background:#0009; z-index:9999; align-items:center; justify-content:center; }
+  #overlay.show { display:flex; }
+</style>
+</head>
+<body>
+
+<!-- spinner overlay -->
+<div id="overlay"><div class="spinner-border text-primary" style="width:3rem;height:3rem"></div></div>
+
+<!-- top bar -->
+<div class="topbar d-flex align-items-center gap-3">
+  <h5>ICT SMT Dashboard</h5>
+  <span class="badge badge-tf" id="tf-badge">15m</span>
+  <span class="badge bg-danger" id="live-badge">● LIVE</span>
+  <span class="ms-auto text-secondary" id="ref-time" style="font-size:.75rem"></span>
+  <button class="btn btn-sm btn-outline-secondary ms-2" data-bs-toggle="modal" data-bs-target="#glossaryModal" title="Acronym glossary" style="font-size:.72rem;padding:2px 8px;">?&nbsp;Glossary</button>
+</div>
+
+<!-- Glossary Modal -->
+<div class="modal fade" id="glossaryModal" tabindex="-1" aria-labelledby="glossaryModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="background:#161b22;border:1px solid #30363d;">
+      <div class="modal-header" style="background:#21262d;border-bottom:1px solid #30363d;padding:8px 16px;">
+        <h6 class="modal-title" id="glossaryModalLabel" style="color:#58a6ff;margin:0;">ICT Level Acronyms</h6>
+        <button type="button" class="btn-close btn-close-white btn-sm" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="padding:12px 16px;">
+
+        <p style="font-size:.72rem;color:#8b949e;margin-bottom:10px;">All price levels used in the dashboard and their meaning:</p>
+
+        <table class="table table-sm table-borderless mb-3" style="font-size:.78rem;">
+          <thead><tr style="color:#58a6ff;border-bottom:1px solid #30363d;"><th>Acronym</th><th>Full Name</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="lbl-PDH fw-bold">PDH</td><td>Previous Day High</td><td style="color:#8b949e;">Yesterday's highest price — resistance / stop cluster above</td></tr>
+            <tr><td class="lbl-PDL fw-bold">PDL</td><td>Previous Day Low</td><td style="color:#8b949e;">Yesterday's lowest price — support / stop cluster below</td></tr>
+            <tr><td class="lbl-PWH fw-bold">PWH</td><td>Previous Week High</td><td style="color:#8b949e;">Last week's highest price — higher-timeframe resistance</td></tr>
+            <tr><td class="lbl-PWL fw-bold">PWL</td><td>Previous Week Low</td><td style="color:#8b949e;">Last week's lowest price — higher-timeframe support</td></tr>
+            <tr><td class="lbl-HOD fw-bold">HOD</td><td>High of Day</td><td style="color:#8b949e;">Today's highest price so far</td></tr>
+            <tr><td class="lbl-LOD fw-bold">LOD</td><td>Low of Day</td><td style="color:#8b949e;">Today's lowest price so far</td></tr>
+            <tr><td class="lbl-TDO fw-bold">TDO</td><td>Today's Daily Open</td><td style="color:#8b949e;">First candle open at 07:00 IL (start of Q2 / London open)</td></tr>
+            <tr><td class="lbl-TWO fw-bold">TWO</td><td>This Week's Open</td><td style="color:#8b949e;">First candle open on Tuesday (weekly session open)</td></tr>
+            <tr><td class="lbl-NYO fw-bold">NYO</td><td>NY Open</td><td style="color:#8b949e;">Price at 16:30 IL = 09:30 ET — New York session open</td></tr>
+            <tr><td class="lbl-Q1H fw-bold">Q1H / Q1L</td><td>Quarter 1 High / Low</td><td style="color:#8b949e;">Today's H/L during 01:00–07:00 IL (overnight / Asia)</td></tr>
+            <tr><td class="lbl-Q2H fw-bold">Q2H / Q2L</td><td>Quarter 2 High / Low</td><td style="color:#8b949e;">Today's H/L during 07:00–13:00 IL (London session)</td></tr>
+            <tr><td class="lbl-Q3H fw-bold">Q3H / Q3L</td><td>Quarter 3 High / Low</td><td style="color:#8b949e;">Today's H/L during 13:00–19:00 IL (NY Open is here)</td></tr>
+            <tr><td class="lbl-Q4H fw-bold">Q4H / Q4L</td><td>Quarter 4 High / Low</td><td style="color:#8b949e;">Today's H/L during 19:00–00:00 IL (NY afternoon)</td></tr>
+          </tbody>
+        </table>
+
+        <p style="font-size:.78rem;color:#58a6ff;margin-bottom:6px;border-top:1px solid #30363d;padding-top:10px;">SMT Signal Types</p>
+        <table class="table table-sm table-borderless mb-3" style="font-size:.78rem;">
+          <thead><tr style="color:#58a6ff;border-bottom:1px solid #30363d;"><th>Type</th><th>What it means</th></tr></thead>
+          <tbody>
+            <tr><td class="smt-long fw-bold">Regular SMT</td><td style="color:#8b949e;">MNQ sweeps a swing level while MES holds (or vice versa) — classic divergence</td></tr>
+            <tr><td class="smt-long fw-bold">Hidden SMT</td><td style="color:#8b949e;">Body-based divergence: one index closes beyond its reference body, the other holds</td></tr>
+            <tr><td class="smt-long fw-bold">Fill Type 1</td><td style="color:#8b949e;">SMT during an FVG fill — price sweeping liquidity inside a Fair Value Gap</td></tr>
+            <tr><td class="smt-long fw-bold">Fill Type 2</td><td style="color:#8b949e;">SMT at FVG boundary — divergence at the edge of an unfilled gap</td></tr>
+          </tbody>
+        </table>
+
+        <p style="font-size:.78rem;color:#58a6ff;margin-bottom:6px;border-top:1px solid #30363d;padding-top:10px;">ICT Concepts</p>
+        <table class="table table-sm table-borderless" style="font-size:.78rem;">
+          <thead><tr style="color:#58a6ff;border-bottom:1px solid #30363d;"><th>Term</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="fw-bold" style="color:#e6edf3;">SMT</td><td style="color:#8b949e;">Smart Money Technique — divergence between correlated instruments revealing institutional intent</td></tr>
+            <tr><td class="fw-bold" style="color:#e6edf3;">FVG</td><td style="color:#8b949e;">Fair Value Gap — 3-candle imbalance; bullish when c3.low &gt; c1.high; bearish when c3.high &lt; c1.low</td></tr>
+            <tr><td class="fw-bold" style="color:#e6edf3;">Liquidity Sweep</td><td style="color:#8b949e;">Price briefly breaking a key level to trigger stop-losses before reversing</td></tr>
+            <tr><td class="fw-bold" style="color:#e6edf3;">Discount / Premium</td><td style="color:#8b949e;">Below TDO/TWO midpoint = Discount (buy zone); above = Premium (sell zone)</td></tr>
+            <tr><td class="fw-bold" style="color:#e6edf3;">MNQ</td><td style="color:#8b949e;">Micro E-mini Nasdaq-100 futures</td></tr>
+            <tr><td class="fw-bold" style="color:#e6edf3;">MES</td><td style="color:#8b949e;">Micro E-mini S&P 500 futures</td></tr>
+          </tbody>
+        </table>
+
+      </div>
+      <div class="modal-footer" style="background:#21262d;border-top:1px solid #30363d;padding:6px 16px;">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- controls -->
+<div id="controls" class="d-flex flex-wrap align-items-center">
+  <!-- mode toggle -->
+  <div class="btn-group btn-group-sm me-3" role="group">
+    <input type="radio" class="btn-check" name="mode" id="mode-live" checked>
+    <label class="btn btn-outline-primary" for="mode-live">Live</label>
+    <input type="radio" class="btn-check" name="mode" id="mode-date">
+    <label class="btn btn-outline-primary" for="mode-date">Date</label>
+  </div>
+
+  <!-- date picker (hidden in live mode) -->
+  <div id="date-controls" class="d-flex align-items-center gap-2 d-none">
+    <input type="date" id="date-input" class="form-control form-control-sm" style="width:145px">
+    <span class="text-secondary" style="font-size:.8rem">Hour:</span>
+    <div class="d-flex gap-1" id="hour-buttons">
+      <!-- Q3 checkpoints -->
+      <button class="btn btn-sm btn-outline-secondary btn-hour" data-hour="13">13:00</button>
+      <button class="btn btn-sm btn-outline-secondary btn-hour" data-hour="14">14:00</button>
+      <button class="btn btn-sm btn-outline-secondary btn-hour active" data-hour="15">15:00</button>
+      <button class="btn btn-sm btn-outline-secondary btn-hour" data-hour="16">16:00</button>
+      <button class="btn btn-sm btn-outline-secondary btn-hour" data-hour="17">17:00</button>
+      <button class="btn btn-sm btn-outline-secondary btn-hour" data-hour="18">18:00</button>
+    </div>
+    <span class="text-secondary ms-1" style="font-size:.75rem">@</span>
+    <span id="step-time" style="font-family:monospace;font-size:.82rem;color:#58a6ff;min-width:38px;text-align:center">15:00</span>
+    <button class="btn btn-sm btn-outline-secondary px-2" id="step-prev" title="Previous candle (←)">&#9664;</button>
+    <button class="btn btn-sm btn-outline-secondary px-2" id="step-next" title="Next candle (→)">&#9654;</button>
+    <button class="btn btn-sm btn-primary ms-1" id="scan-btn">Scan</button>
+  </div>
+
+  <div class="ms-auto d-flex align-items-center gap-2">
+    <span class="text-secondary" style="font-size:.8rem">Scale:</span>
+    <div class="btn-group btn-group-sm" id="tf-buttons" role="group">
+      <button class="btn btn-outline-secondary btn-tf active" data-tf="15m">15m</button>
+      <button class="btn btn-outline-secondary btn-tf" data-tf="1h">1H</button>
+      <button class="btn btn-outline-secondary btn-tf" data-tf="4h">4H</button>
+      <button class="btn btn-outline-secondary btn-tf" data-tf="1d">1D</button>
+    </div>
+    <div class="btn-group btn-group-sm" id="source-buttons" role="group" title="Data source">
+      <button class="btn btn-outline-warning btn-src active" data-src="yfinance">YFinance</button>
+      <button class="btn btn-outline-warning btn-src" data-src="twelvedata">12Data</button>
+    </div>
+    <button class="btn btn-sm btn-primary" id="lock-btn" title="Lock charts together">&#128274; Locked</button>
+    <button class="btn btn-sm btn-outline-secondary" id="refresh-btn" title="Refresh now">&#8635;</button>
+    <button class="btn btn-sm btn-outline-warning" id="alert-btn" title="Send Telegram alert for current signals" disabled>&#128241; Alert</button>
+  </div>
+</div>
+
+<!-- main content -->
+<div class="container-fluid px-3 main-content">
+
+  <!-- charts row -->
+  <div class="row g-3 mb-2 charts-row">
+    <div class="col-lg-6">
+      <div class="chart-wrap">
+        <div class="chart-label">MNQ — Micro Nasdaq-100 <span id="mnq-price" class="text-warning ms-2 fw-bold"></span></div>
+        <div id="chart-mnq" style="height:calc(52vh - 80px); min-height:220px"></div>
+        <div id="hover-info-mnq" class="chart-hover-info"></div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="chart-wrap">
+        <div class="chart-label">MES — Micro S&amp;P 500 <span id="mes-price" class="text-warning ms-2 fw-bold"></span></div>
+        <div id="chart-mes" style="height:calc(52vh - 80px); min-height:220px"></div>
+        <div id="hover-info-mes" class="chart-hover-info"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- bottom data row -->
+  <div class="row g-3 data-row">
+
+    <!-- Quarters table -->
+    <div class="col-md-4">
+      <div class="tbl-card h-100">
+        <div class="card-header">Quarters (Israel Time)</div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0" id="tbl-quarters">
+            <thead><tr>
+              <th>Q</th><th>Range</th>
+              <th class="text-end" style="color:#58a6ff">MNQ H</th><th class="text-end" style="color:#58a6ff">MNQ L</th>
+              <th class="text-end" style="color:#f0883e">MES H</th><th class="text-end" style="color:#f0883e">MES L</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Levels table -->
+    <div class="col-md-4">
+      <div class="tbl-card h-100">
+        <div class="card-header">Levels</div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0" id="tbl-levels">
+            <thead><tr>
+              <th>Label</th>
+              <th class="text-end" style="color:#58a6ff">MNQ</th>
+              <th class="text-end" style="color:#f0883e">MES</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- SMT + FVG signals -->
+    <div class="col-md-4">
+
+      <!-- SMT alert box (shown only when signal exists) -->
+      <div id="smt-alert-box" style="display:none; margin-bottom:6px; border-radius:6px; padding:8px 12px; border-width:2px; border-style:solid;">
+        <div style="font-size:.78rem; font-weight:700; margin-bottom:4px" id="smt-alert-title"></div>
+        <div style="font-size:.72rem; line-height:1.5" id="smt-alert-body"></div>
+      </div>
+
+      <div class="tbl-card mb-3">
+        <div class="card-header">SMT Signals</div>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0" id="tbl-smt">
+            <thead><tr><th>Dir</th><th>Type</th><th>Time</th><th>Detail</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="tbl-card">
+        <div class="card-header">Active FVGs</div>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0" id="tbl-fvg">
+            <thead><tr><th>Inst</th><th>Type</th><th>Bottom</th><th>Top</th><th>Time</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /row -->
+
+  <!-- Recommendation panel -->
+  <div class="row g-3 mt-1" id="rec-row" style="display:none!important">
+    <div class="col-12">
+      <div id="rec-panel">
+        <div class="card-header d-flex align-items-center gap-2">
+          Trade Recommendation
+          <span id="rec-quarter-info" class="ms-2 text-secondary" style="font-size:.72rem"></span>
+        </div>
+        <div class="p-3">
+          <div class="row g-3 align-items-start">
+
+            <!-- Action + score -->
+            <div class="col-auto d-flex flex-column align-items-center gap-2">
+              <div id="rec-action-badge">—</div>
+              <div id="rec-strength" class="text-center"></div>
+              <div class="text-secondary" style="font-size:.72rem">Score: <span id="rec-score-val">—</span></div>
+            </div>
+
+            <!-- Factor breakdown -->
+            <div class="col">
+              <div class="row g-2">
+                <!-- liquidity -->
+                <div class="col-md-3 col-6">
+                  <div class="text-secondary mb-1" style="font-size:.72rem">Liquidity <span id="rec-liq-w" class="text-muted"></span></div>
+                  <div class="rec-score-bar"><div id="rec-liq-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+                  <div id="rec-liq-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
+                </div>
+                <!-- SMT -->
+                <div class="col-md-3 col-6">
+                  <div class="text-secondary mb-1" style="font-size:.72rem">SMT <span id="rec-smt-w" class="text-muted"></span></div>
+                  <div class="rec-score-bar"><div id="rec-smt-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+                  <div id="rec-smt-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
+                </div>
+                <!-- TDO/TWO -->
+                <div class="col-md-3 col-6">
+                  <div class="text-secondary mb-1" style="font-size:.72rem">TDO/TWO <span id="rec-tdo-w" class="text-muted"></span></div>
+                  <div class="rec-score-bar"><div id="rec-tdo-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+                  <div id="rec-tdo-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
+                </div>
+                <!-- Quarter multiplier -->
+                <div class="col-md-3 col-6">
+                  <div class="text-secondary mb-1" style="font-size:.72rem">Quarter ×</div>
+                  <div class="rec-score-bar"><div id="rec-q-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+                  <div id="rec-q-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Reasons -->
+            <div class="col-md-3">
+              <div class="text-secondary mb-1" style="font-size:.72rem">Analysis</div>
+              <ul id="rec-reasons" class="list-unstyled mb-0" style="font-size:.72rem"></ul>
+            </div>
+
+            <!-- Targets -->
+            <div class="col-md-3" id="rec-targets-col" style="display:none">
+              <div class="text-secondary mb-1" style="font-size:.72rem">Levels (MNQ)</div>
+              <div id="rec-targets" style="font-size:.72rem; font-family:monospace; line-height:1.7"></div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /rec-row -->
+
+</div><!-- /container -->
+
+<!-- status bar -->
+<div id="statusbar" class="d-flex gap-3">
+  <span id="sb-status">—</span>
+  <span id="sb-candle"></span>
+  <span id="sb-td"></span>
+  <span id="sb-next" class="ms-auto"></span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   State
+════════════════════════════════════════════════════════════════ */
+let liveTimer      = null;
+let selectedHour   = 15;
+let selectedMinute = 0;
+let selectedTf     = '15m';
+let selectedSource = 'yfinance';
+const TF_MINUTES   = { '15m': 15, '1h': 60, '4h': 240, '1d': 1440 };
+let chartsLocked   = true;
+let isSyncing        = false;
+let mnqCurrent       = 0;
+let mesCurrent       = 0;
+const hoverListeners = {};     // divId → bool, prevent stacking listeners
+const listenersAttached = {};
+const INTERVAL_BY_SOURCE = { yfinance:60_000, twelvedata:300_000 };
+const LIVE_INTERVAL_MS   = () => INTERVAL_BY_SOURCE[selectedSource] ?? 60_000;
+
+/* ── Sync logic ─────────────────────────────────────────────── */
+function syncCharts(srcDiv, ed) {
+  if (!chartsLocked || isSyncing) return;
+  isSyncing = true;
+
+  const tgtDiv = srcDiv === 'chart-mnq' ? 'chart-mes' : 'chart-mnq';
+  const update = {};
+
+  // X-axis (time) — mirror exactly
+  if (ed['xaxis.range[0]'] !== undefined) {
+    update['xaxis.range[0]'] = ed['xaxis.range[0]'];
+    update['xaxis.range[1]'] = ed['xaxis.range[1]'];
+  } else if (ed['xaxis.autorange'] === true) {
+    update['xaxis.autorange'] = true;
+  }
+
+  // Y-axis — proportional to price ratio so visual % range matches
+  if (ed['yaxis.range[0]'] !== undefined) {
+    const srcY0  = ed['yaxis.range[0]'];
+    const srcY1  = ed['yaxis.range[1]'];
+    const srcMid = (srcY0 + srcY1) / 2;
+    const srcRng = srcY1 - srcY0;
+
+    const [srcCur, tgtCur] = srcDiv === 'chart-mnq'
+      ? [mnqCurrent, mesCurrent]
+      : [mesCurrent, mnqCurrent];
+
+    if (srcCur && tgtCur) {
+      const ratio  = tgtCur / srcCur;
+      const tgtRng = srcRng * ratio;
+      const tgtMid = tgtCur * (srcMid / srcCur);   // proportional center
+      update['yaxis.range[0]'] = tgtMid - tgtRng / 2;
+      update['yaxis.range[1]'] = tgtMid + tgtRng / 2;
+    }
+  } else if (ed['yaxis.autorange'] === true) {
+    update['yaxis.autorange'] = true;
+  }
+
+  if (Object.keys(update).length) {
+    Plotly.relayout(tgtDiv, update).then(() => { isSyncing = false; });
+  } else {
+    isSyncing = false;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Level colours (matching terminal display)
+════════════════════════════════════════════════════════════════ */
+const LEVEL_COLOR = {
+  PDH:'#f0883e', PDL:'#f0883e',
+  PWH:'#bc8cff', PWL:'#bc8cff',
+  HOD:'#ffa657', LOD:'#ffa657',
+  TDO:'#8b949e',
+  TWO:'#26c6da',
+  NYO:'#58a6ff',
+};
+function levelColor(lbl) {
+  if (LEVEL_COLOR[lbl]) return LEVEL_COLOR[lbl];
+  if (/^Q\d[HL]$/.test(lbl)) return '#55d98077';
+  return '#444c56';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Quarter background shading helpers
+════════════════════════════════════════════════════════════════ */
+// Q1=A(Gray) Q2=M(Red) Q3=D(Green) Q4=X(Blue) — ICT AMD-X model, light colors
+const QUARTER_COLORS = ['#b0b0b033','#ef9a9a33','#a5d6a733','#90caf933'];
+const QUARTER_BORDER = ['#b0b0b0',  '#ef9a9a',  '#a5d6a7',  '#90caf9'];
+
+function uniqueDates(candles) {
+  const seen = new Set();
+  for (const c of candles) seen.add(c.t.slice(0, 10));
+  return [...seen].sort();
+}
+
+// Extract "+03:00" / "-05:00" from a candle ISO timestamp so shape
+// timestamps share the same timezone reference as the candle data.
+function tzOffset(candles) {
+  if (!candles || !candles.length) return '';
+  const m = (candles[0].t || '').match(/([+-]\d{2}:\d{2})$/);
+  return m ? m[1] : '';
+}
+
+function buildQuarterShapes(candles) {
+  if (!candles || candles.length === 0) return [];
+  const tz  = tzOffset(candles);   // e.g. "+03:00"
+  const ts  = (date, h, m='00') => `${date}T${String(h).padStart(2,'0')}:${m}:00${tz}`;
+  const shapes = [];
+  const quarters = [
+    {s:1,  e:7,  color: QUARTER_COLORS[0], border: QUARTER_BORDER[0]},
+    {s:7,  e:13, color: QUARTER_COLORS[1], border: QUARTER_BORDER[1]},
+    {s:13, e:19, color: QUARTER_COLORS[2], border: QUARTER_BORDER[2]},
+    {s:19, e:24, color: QUARTER_COLORS[3], border: QUARTER_BORDER[3]},
+  ];
+  for (const date of uniqueDates(candles)) {
+    for (const q of quarters) {
+      const x0 = ts(date, q.s);
+      const x1 = q.e === 24 ? ts(date, 23, '59') : ts(date, q.e);
+      shapes.push({
+        type:'rect', xref:'x', yref:'paper',
+        x0, x1, y0:0, y1:1,
+        fillcolor: q.color, line:{width:0},
+        layer:'below',
+      });
+      shapes.push({
+        type:'line', xref:'x', yref:'paper',
+        x0, x1:x0, y0:0, y1:1,
+        line:{color: q.border, width:1.5, dash:'solid'},
+      });
+    }
+  }
+  return shapes;
+}
+
+function buildQuarterTicks(candles) {
+  if (!candles || candles.length === 0) return { tickvals:[], ticktext:[] };
+  const tz  = tzOffset(candles);
+  const ts  = (date, h) => `${date}T${String(h).padStart(2,'0')}:00:00${tz}`;
+  // Quarter boundaries: 01:00 (Q1), 07:00 (Q2), 13:00 (Q3), 19:00 (Q4)
+  const boundaries = [
+    { h:1,  label:'Q1\n01:00', color: QUARTER_BORDER[0] },
+    { h:7,  label:'Q2\n07:00', color: QUARTER_BORDER[1] },
+    { h:13, label:'Q3\n13:00', color: QUARTER_BORDER[2] },
+    { h:19, label:'Q4\n19:00', color: QUARTER_BORDER[3] },
+  ];
+  const dates = uniqueDates(candles);
+  const tickvals = [], ticktext = [];
+  for (const date of dates) {
+    const dateLabel = date.slice(5).replace('-', '/');   // "MM/DD"
+    for (let i = 0; i < boundaries.length; i++) {
+      const b = boundaries[i];
+      tickvals.push(ts(date, b.h));
+      // Show date only on first tick of each day (Q1)
+      ticktext.push(i === 0 ? `${dateLabel}\n${b.label}` : b.label);
+    }
+  }
+  return { tickvals, ticktext };
+}
+
+function buildQuarterAnnotations(candles) {
+  if (!candles || candles.length === 0) return [];
+  const tz  = tzOffset(candles);
+  const ts  = (date, h) => `${date}T${String(h).padStart(2,'0')}:00:00${tz}`;
+  const quarters = [
+    {mid:4,  color: QUARTER_BORDER[0], label:'Q1 A'},
+    {mid:10, color: QUARTER_BORDER[1], label:'Q2 M'},
+    {mid:16, color: QUARTER_BORDER[2], label:'Q3 D'},
+    {mid:21, color: QUARTER_BORDER[3], label:'Q4 X'},
+  ];
+  const annotations = [];
+  for (const date of uniqueDates(candles)) {
+    for (const q of quarters) {
+      annotations.push({
+        xref:'x', yref:'paper',
+        x: ts(date, q.mid),
+        y: 0.98, yanchor:'top',
+        text: q.label,
+        showarrow: false,
+        font:{color: q.color, size:11, family:'monospace'},
+        bgcolor:'#0d111788',
+        borderpad:2,
+      });
+    }
+  }
+  return annotations;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Build Plotly chart
+════════════════════════════════════════════════════════════════ */
+// Per-chart state: was the chart in default (autorange) view before last data refresh?
+const chartWasDefault  = {};   // divId → bool
+const chartLatestTime  = {};   // divId → ISO string of latest candle
+
+/* ── Hover info bar helpers ─────────────────────────────────── */
+function showHoverInfo(infoId, pt, ticker) {
+  const el = document.getElementById(infoId);
+  if (!el) return;
+  const o = pt.open, h = pt.high, l = pt.low, c = pt.close;
+  if (o == null) { el.innerHTML = ''; return; }
+  const chg = c - o;
+  const chgPct = ((chg / o) * 100).toFixed(2);
+  const chgCol  = chg >= 0 ? '#3fb950' : '#f85149';
+  const closeCol = chg >= 0 ? '#3fb950' : '#f85149';
+  let t = '';
+  if (pt.x) {
+    const d = new Date(pt.x);
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mi = String(d.getMinutes()).padStart(2,'0');
+    t = `${dd}/${mm} ${hh}:${mi}`;
+  }
+  const fmt = v => v != null ? Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  el.innerHTML =
+    `<span style="color:#58a6ff;font-weight:700">${ticker}</span>` +
+    `<span style="color:#8b949e">${t}</span>` +
+    `<span>O:&nbsp;<span style="color:#e6edf3">${fmt(o)}</span></span>` +
+    `<span>H:&nbsp;<span style="color:#3fb950">${fmt(h)}</span></span>` +
+    `<span>L:&nbsp;<span style="color:#f85149">${fmt(l)}</span></span>` +
+    `<span>C:&nbsp;<span style="color:${closeCol}">${fmt(c)}</span></span>` +
+    `<span style="color:${chgCol}">${chg >= 0 ? '+' : ''}${fmt(chg)}&nbsp;(${chg >= 0 ? '+' : ''}${chgPct}%)</span>`;
+}
+
+function clearHoverInfo(infoId) {
+  const el = document.getElementById(infoId);
+  if (el) el.innerHTML = '';
+}
+
+/* Find the candle in a chart whose timestamp is closest to targetMs */
+function findClosestPoint(divId, targetMs) {
+  const el = document.getElementById(divId);
+  if (!el || !el.data || !el.data[0]) return null;
+  const d = el.data[0];
+  let closest = 0, minDiff = Infinity;
+  for (let i = 0; i < d.x.length; i++) {
+    const diff = Math.abs(new Date(d.x[i]).getTime() - targetMs);
+    if (diff < minDiff) { minDiff = diff; closest = i; }
+  }
+  if (minDiff > 4 * 60 * 60 * 1000) return null; // no candle within 4h
+  return {
+    x:     d.x[closest],
+    open:  d.open[closest],
+    high:  d.high[closest],
+    low:   d.low[closest],
+    close: d.close[closest],
+  };
+}
+
+function savedZoom(divId) {
+  const el = document.getElementById(divId);
+  if (!el || !el._fullLayout) {
+    chartWasDefault[divId] = true;
+    return null;
+  }
+  const xl = el._fullLayout.xaxis;
+  const yl = el._fullLayout.yaxis;
+  if (!xl || xl.autorange) {
+    chartWasDefault[divId] = true;
+    return null;
+  }
+  chartWasDefault[divId] = false;
+  return {
+    'xaxis.range[0]': xl.range[0],
+    'xaxis.range[1]': xl.range[1],
+    'yaxis.range[0]': yl.range[0],
+    'yaxis.range[1]': yl.range[1],
+  };
+}
+
+async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice, ticker, hiddenSmts = []) {
+  const zoom = savedZoom(divId);   // capture before react() resets it (also sets chartWasDefault)
+  if (candles.length) chartLatestTime[divId] = candles[candles.length - 1].t;
+  const ts   = candles.map(c => c.t);
+  const open = candles.map(c => c.o);
+  const high = candles.map(c => c.h);
+  const low  = candles.map(c => c.l);
+  const clos = candles.map(c => c.c);
+
+  const candleTrace = {
+    type:'candlestick', x:ts, open, high, low, close:clos,
+    name: ticker,
+    increasing:{line:{color:'#3fb950'}, fillcolor:'#3fb950'},
+    decreasing:{line:{color:'#f85149'}, fillcolor:'#f85149'},
+    showlegend:false,
+    hoverinfo:'x+y',
+  };
+
+  // ── level lines + right-edge labels ──
+  const levelShapes = [];
+  const levelAnnotations = [];
+  for (const [lbl, val] of Object.entries(levels)) {
+    const col = levelColor(lbl);
+    levelShapes.push({
+      type:'line', xref:'paper', yref:'y',
+      x0:0, x1:1, y0:val, y1:val,
+      line:{color: col, width:1, dash:'dash'},
+    });
+    levelAnnotations.push({
+      xref:'paper', yref:'y',
+      x:1.01, y:val,
+      xanchor:'left', yanchor:'middle',
+      text:`${lbl} ${val}`,
+      showarrow:false,
+      font:{color:col, size:10, family:'monospace'},
+    });
+  }
+
+  // ── FVG rectangles ──
+  const fvgShapes = fvgs.map(f => ({
+    type:'rect', xref:'paper', yref:'y',
+    x0:0, x1:1,
+    y0: f.bottom, y1: f.top,
+    fillcolor: f.type === 'bullish' ? '#3fb95022' : '#f8514922',
+    line:{width:0},
+    layer:'below',
+  }));
+
+  // ── SMT annotation markers ──
+  const smtAnnotations = smtSignals.map(s => {
+    const isLong = s.direction === 'LONG';
+    return {
+      x: s.time,
+      y: ticker === 'MNQ' ? s.mnq_val : s.mes_val,
+      xref:'x', yref:'y',
+      text: isLong ? '▲ SMT' : '▼ SMT',
+      showarrow:true,
+      arrowhead:2,
+      arrowcolor: isLong ? '#3fb950' : '#f85149',
+      font:{color: isLong ? '#3fb950' : '#f85149', size:10},
+      ax:0, ay: isLong ? 30 : -30,
+    };
+  });
+
+  // current price annotation
+  const priceAnnotation = {
+    xref:'paper', yref:'y',
+    x:1, y: currentPrice,
+    text: `  ${currentPrice}`,
+    showarrow:false,
+    font:{color:'#e6edf3', size:11, family:'monospace'},
+    bgcolor:'#1f6feb',
+    borderpad:2,
+  };
+
+  const quarterShapes      = buildQuarterShapes(candles);
+  const quarterAnnotations = buildQuarterAnnotations(candles);
+  const quarterTicks       = buildQuarterTicks(candles);
+
+  // ── Hidden SMT reference line — most recent signal only ──────
+  const hiddenRefShapes      = [];
+  const hiddenRefAnnotations = [];
+  const lastCandleT = candles.length ? candles[candles.length - 1].t : null;
+
+  // Only draw for the single most-recent hidden SMT
+  const sortedHidden = [...hiddenSmts].sort((a, b) => b.time > a.time ? 1 : -1);
+  const latestHidden = sortedHidden.length ? sortedHidden[0] : null;
+  if (latestHidden && lastCandleT) {
+    const isLong   = (latestHidden.direction || '').includes('LONG');
+    const refLevel = ticker === 'MNQ' ? latestHidden.ref_mnq : latestHidden.ref_mes;
+    const refTime  = ticker === 'MNQ' ? latestHidden.ref_mnq_time : latestHidden.ref_mes_time;
+
+    if (refLevel != null && refTime != null) {
+      hiddenRefShapes.push({
+        type:'line', xref:'x', yref:'y',
+        x0: refTime, x1: lastCandleT,
+        y0: refLevel, y1: refLevel,
+        line:{ color:'#f0883e', width:1.5, dash:'dash' },
+      });
+      hiddenRefAnnotations.push({
+        xref:'paper', yref:'y',
+        x: 0.99, y: refLevel,
+        xanchor:'right', yanchor: isLong ? 'top' : 'bottom',
+        text: `Ref ${refLevel.toFixed(2)}`,
+        showarrow: false,
+        font:{ color:'#f0883e', size:9, family:'monospace' },
+      });
+    }
+  }
+
+  const layout = {
+    template:'plotly_dark',
+    paper_bgcolor:'#161b22',
+    plot_bgcolor:'#0d1117',
+    margin:{t:8, b:55, l:60, r:90},
+    xaxis:{
+      type:'date',
+      showgrid:true, gridcolor:'#30363d', gridwidth:1,
+      rangeslider:{visible:false},
+      tickvals: quarterTicks.tickvals,
+      ticktext: quarterTicks.ticktext,
+      hoverformat:'%d/%m/%Y %H:%M',
+      color:'#8b949e',
+      tickangle: 0,
+    },
+    yaxis:{
+      showgrid:true, gridcolor:'#21262d',
+      color:'#8b949e',
+      tickformat:',.0f',
+      side:'left',
+    },
+    shapes:[...quarterShapes, ...levelShapes, ...fvgShapes, ...hiddenRefShapes],
+    annotations:[...quarterAnnotations, ...levelAnnotations, ...smtAnnotations, ...hiddenRefAnnotations, priceAnnotation],
+    font:{family:'Segoe UI, system-ui, sans-serif', color:'#e6edf3'},
+    hovermode: false,
+  };
+
+  const allTraces = [candleTrace];
+
+  await Plotly.react(divId, allTraces, layout, {
+    responsive:true,
+    displayModeBar:true,
+    displaylogo:false,
+    modeBarButtonsToRemove:['toImage','select2d','lasso2d'],
+    scrollZoom:true,
+  });
+
+  // Restore zoom — suppress sync during restore to avoid ping-pong
+  if (zoom) {
+    isSyncing = true;
+    await Plotly.relayout(divId, zoom);
+    isSyncing = false;
+  }
+
+  // Attach relayout listener once — reattaching would stack callbacks
+  if (!listenersAttached[divId]) {
+    document.getElementById(divId).on('plotly_relayout', ed => {
+      if (isSyncing) return;  // ignore events caused by our own Plotly.relayout calls
+
+      // User reset to full view (double-click / Reset axes) → mark as default again
+      if (ed['xaxis.autorange'] === true) {
+        chartWasDefault[divId] = true;
+        syncCharts(divId, ed);
+        return;
+      }
+
+      // User zoomed from default (full) view → recenter so current time sits at 2/3
+      if (chartWasDefault[divId] && ed['xaxis.range[0]'] !== undefined) {
+        chartWasDefault[divId] = false;
+        const latest = chartLatestTime[divId];
+        if (latest) {
+          const span    = new Date(ed['xaxis.range[1]']).getTime()
+                        - new Date(ed['xaxis.range[0]']).getTime();
+          const latestMs = new Date(latest).getTime();
+          const newX1   = latestMs + span / 3;   // 1/3 of span after latest → current at 2/3
+          const newX0   = newX1 - span;
+          const tgtDiv  = divId === 'chart-mnq' ? 'chart-mes' : 'chart-mnq';
+          isSyncing = true;
+          Promise.all([
+            Plotly.relayout(divId, {
+              'xaxis.range[0]': new Date(newX0).toISOString(),
+              'xaxis.range[1]': new Date(newX1).toISOString(),
+              'yaxis.autorange': true,
+            }),
+            chartsLocked ? Plotly.relayout(tgtDiv, {
+              'xaxis.range[0]': new Date(newX0).toISOString(),
+              'xaxis.range[1]': new Date(newX1).toISOString(),
+              'yaxis.autorange': true,
+            }) : Promise.resolve(),
+          ]).then(() => { isSyncing = false; });
+          return;
+        }
+      }
+
+      // Normal zoom/pan while already in a custom view → sync as usual
+      chartWasDefault[divId] = false;
+      syncCharts(divId, ed);
+    });
+    listenersAttached[divId] = true;
+  }
+
+  // ── CSS crosshair overlay (created once inside the chart div) ──
+  const chartEl = document.getElementById(divId);
+  chartEl.style.position = 'relative';
+  if (!chartEl.querySelector('.chart-xhair')) {
+    const xh = document.createElement('div');
+    xh.className = 'chart-xhair';
+    chartEl.appendChild(xh);
+  }
+
+  // ── mousemove: crosshair on both charts + info bars ──────────
+  if (!hoverListeners[divId]) {
+    const tgtDiv  = divId === 'chart-mnq' ? 'chart-mes'      : 'chart-mnq';
+    const infoId  = divId === 'chart-mnq' ? 'hover-info-mnq' : 'hover-info-mes';
+    const tgtInfo = divId === 'chart-mnq' ? 'hover-info-mes' : 'hover-info-mnq';
+    const tgtTick = divId === 'chart-mnq' ? 'MES' : 'MNQ';
+
+    function hideAll() {
+      chartEl.querySelector('.chart-xhair').style.display = 'none';
+      const tgtXh = document.getElementById(tgtDiv)?.querySelector('.chart-xhair');
+      if (tgtXh) tgtXh.style.display = 'none';
+      clearHoverInfo(infoId);
+      clearHoverInfo(tgtInfo);
+    }
+
+    chartEl.addEventListener('mousemove', function(e) {
+      const srcLayout = chartEl._fullLayout;
+      if (!srcLayout) return;
+
+      const rect   = chartEl.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+
+      const mL    = srcLayout.margin.l;
+      const mT    = srcLayout.margin.t;
+      const mB    = srcLayout.margin.b;
+      const plotW = srcLayout.width  - mL - srcLayout.margin.r;
+      const plotH = srcLayout.height - mT - mB;
+      const xInPl = mouseX - mL;
+
+      if (xInPl < 0 || xInPl > plotW) { hideAll(); return; }
+
+      // ── source crosshair ──
+      const srcXh = chartEl.querySelector('.chart-xhair');
+      srcXh.style.left    = mouseX + 'px';
+      srcXh.style.top     = mT + 'px';
+      srcXh.style.height  = plotH + 'px';
+      srcXh.style.display = 'block';
+
+      // ── timestamp at cursor ──
+      const xRange = srcLayout.xaxis.range;
+      const xStart = new Date(xRange[0]).getTime();
+      const xEnd   = new Date(xRange[1]).getTime();
+      const xMs    = xStart + (xInPl / plotW) * (xEnd - xStart);
+
+      // ── source info bar ──
+      const srcPt = findClosestPoint(divId, xMs);
+      if (srcPt) showHoverInfo(infoId, srcPt, ticker);
+
+      // ── target crosshair ──
+      const tgtEl = document.getElementById(tgtDiv);
+      const tgtLayout = tgtEl?._fullLayout;
+      const tgtXh = tgtEl?.querySelector('.chart-xhair');
+      if (tgtLayout && tgtXh) {
+        const tmL   = tgtLayout.margin.l;
+        const tmT   = tgtLayout.margin.t;
+        const tmB   = tgtLayout.margin.b;
+        const tPlotW = tgtLayout.width  - tmL - tgtLayout.margin.r;
+        const tPlotH = tgtLayout.height - tmT - tmB;
+        const tX    = tmL + (xInPl / plotW) * tPlotW;
+        tgtXh.style.left    = tX + 'px';
+        tgtXh.style.top     = tmT + 'px';
+        tgtXh.style.height  = tPlotH + 'px';
+        tgtXh.style.display = 'block';
+      }
+
+      // ── target info bar ──
+      const tgtPt = findClosestPoint(tgtDiv, xMs);
+      if (tgtPt) showHoverInfo(tgtInfo, tgtPt, tgtTick);
+    });
+
+    chartEl.addEventListener('mouseleave', hideAll);
+    hoverListeners[divId] = true;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Tables
+════════════════════════════════════════════════════════════════ */
+const Q_TABLE_COLORS = ['#b0b0b0','#ef9a9a','#a5d6a7','#90caf9'];
+function renderQuarters(quarters) {
+  const tbody = document.querySelector('#tbl-quarters tbody');
+  tbody.innerHTML = '';
+  for (const q of quarters) {
+    const tr = document.createElement('tr');
+    if (q.current) tr.classList.add('tag-current');
+    if (q.future)  tr.classList.add('tag-future');
+    const qColor = Q_TABLE_COLORS[q.num - 1];
+    tr.innerHTML = `
+      <td style="color:${qColor};font-weight:600">Q${q.num}${q.current ? ' ►' : ''}</td>
+      <td>${q.range}</td>
+      ${q.future
+        ? '<td colspan="4" class="text-secondary text-center">future</td>'
+        : `<td class="text-end">${q.mnq_h ?? '—'}</td>
+           <td class="text-end">${q.mnq_l ?? '—'}</td>
+           <td class="text-end">${q.mes_h ?? '—'}</td>
+           <td class="text-end">${q.mes_l ?? '—'}</td>`}
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderLevels(mnqLevels, mesLevels, mnqCurrent, mesCurrent) {
+  // Merge all label keys
+  const allKeys = new Set([...Object.keys(mnqLevels), ...Object.keys(mesLevels)]);
+  // Sort by MNQ value descending (above current first), with current in middle
+  const rows = [...allKeys].map(k => ({
+    k,
+    mnq: mnqLevels[k] ?? null,
+    mes: mesLevels[k] ?? null,
+  }));
+  rows.sort((a, b) => {
+    const va = a.mnq ?? a.mes ?? 0;
+    const vb = b.mnq ?? b.mes ?? 0;
+    return vb - va;
+  });
+
+  const tbody = document.querySelector('#tbl-levels tbody');
+  tbody.innerHTML = '';
+
+  // insert current row at the right position
+  let insertedCurrent = false;
+  for (const row of rows) {
+    if (!insertedCurrent && (row.mnq ?? Infinity) < mnqCurrent) {
+      const cur = document.createElement('tr');
+      cur.innerHTML = `<td class="fw-bold text-info">── CURRENT ──</td>
+        <td class="text-end fw-bold text-info">${mnqCurrent}</td>
+        <td class="text-end fw-bold text-info">${mesCurrent}</td>`;
+      tbody.appendChild(cur);
+      insertedCurrent = true;
+    }
+    const smt = (row.mnq !== null && row.mes !== null)
+      ? ((row.mnq > mnqCurrent) !== (row.mes > mesCurrent) ? ' ◄ SMT' : '') : '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="lbl-${row.k}">${row.k}${smt ? `<span style="color:#ffa657;font-size:.7rem">${smt}</span>` : ''}</td>
+      <td class="text-end">${row.mnq ?? '—'}</td>
+      <td class="text-end">${row.mes ?? '—'}</td>`;
+    tbody.appendChild(tr);
+  }
+  if (!insertedCurrent) {
+    const cur = document.createElement('tr');
+    cur.innerHTML = `<td class="fw-bold text-info">── CURRENT ──</td>
+      <td class="text-end fw-bold text-info">${mnqCurrent}</td>
+      <td class="text-end fw-bold text-info">${mesCurrent}</td>`;
+    tbody.appendChild(cur);
+  }
+}
+
+function smtKind(type) {
+  if (!type) return 'SMT';
+  if (type.startsWith('hidden')) return 'Hidden SMT';
+  if (type.startsWith('fill_smt_type1')) return 'Fill SMT Type 1';
+  if (type.startsWith('fill_smt_type2')) return 'Fill SMT Type 2';
+  return 'Regular SMT';
+}
+
+function renderSmt(signals, hiddenSmts, fillSmts) {
+  const all = [
+    ...signals.map(s => ({...s, _kind:'Regular SMT'})),
+    ...hiddenSmts.map(s => ({...s, _kind:'Hidden SMT'})),
+    ...fillSmts.map(s => ({...s, _kind: smtKind(s.type)})),
+  ].sort((a, b) => (b.time > a.time ? 1 : -1));
+
+  const tbody = document.querySelector('#tbl-smt tbody');
+  tbody.innerHTML = '';
+  const box   = document.getElementById('smt-alert-box');
+  const title = document.getElementById('smt-alert-title');
+  const body  = document.getElementById('smt-alert-body');
+
+  if (!all.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="text-secondary text-center">No signals</td></tr>';
+    box.style.display = 'none';
+    return;
+  }
+
+  // Alert box — most recent signal
+  const s = all[0];
+  const isLong = (s.direction || '').includes('LONG');
+  box.style.display = 'block';
+  box.className = isLong ? 'long-alert' : 'short-alert';
+  title.textContent = `${isLong ? '▲ LONG' : '▼ SHORT'} — ${s._kind} @ ${s.time.slice(11,16)}`;
+
+  const hasVals = s.mnq_val != null && s.ref_mnq != null;
+  const mnqLbl = s.ref_mnq_label || 'ref';
+  const mesLbl = s.ref_mes_label || 'ref';
+  body.innerHTML = hasVals ? `
+    <div><span class="lbl">MNQ: </span><span class="val swept">${s.mnq_val.toFixed(2)}</span>
+         <span class="lbl"> ${mnqLbl}: </span><span class="val">${s.ref_mnq.toFixed(2)}</span></div>
+    <div><span class="lbl">MES: </span><span class="val swept">${s.mes_val.toFixed(2)}</span>
+         <span class="lbl"> ${mesLbl}: </span><span class="val">${s.ref_mes.toFixed(2)}</span></div>
+    <div style="margin-top:4px; color:#ccc; font-size:.7rem">${s.detail}</div>
+  ` : `<div style="color:#ccc; font-size:.7rem">${s.detail}</div>`;
+
+  // Table — all signals
+  for (const s of all) {
+    const isL = (s.direction || '').includes('LONG');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="${isL ? 'smt-long' : 'smt-short'}">${isL ? '▲' : '▼'}</td>
+      <td style="font-size:.68rem;color:#8b949e">${s._kind}</td>
+      <td>${s.time.slice(11,16)}</td>
+      <td style="font-size:.68rem">${s.detail}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderFvgs(mnqFvgs, mesFvgs) {
+  const tbody = document.querySelector('#tbl-fvg tbody');
+  tbody.innerHTML = '';
+  const all = [
+    ...mnqFvgs.map(f => ({...f, inst:'MNQ'})),
+    ...mesFvgs.map(f => ({...f, inst:'MES'})),
+  ].sort((a,b) => a.time < b.time ? 1 : -1);
+  if (!all.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-secondary text-center">None</td></tr>';
+    return;
+  }
+  for (const f of all) {
+    const isBull = f.type === 'bullish';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${f.inst}</td>
+      <td class="${isBull ? 'fvg-bull' : 'fvg-bear'}">${isBull ? '▲' : '▼'}</td>
+      <td>${f.bottom}</td>
+      <td>${f.top}</td>
+      <td>${f.time.slice(11,16)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Recommendation panel
+════════════════════════════════════════════════════════════════ */
+function renderRecommendation(rec, quarter, levels, current) {
+  const row = document.getElementById('rec-row');
+  if (!rec) { row.style.setProperty('display','none','important'); return; }
+  row.style.removeProperty('display');
+
+  // Action badge
+  const action = (rec.action || 'WAIT').toUpperCase();
+  const badgeEl = document.getElementById('rec-action-badge');
+  badgeEl.className = action === 'LONG' ? 'rec-action-long'
+                    : action === 'SHORT' ? 'rec-action-short'
+                    : 'rec-action-wait';
+  badgeEl.textContent = action;
+
+  // Strength
+  const strengthEl = document.getElementById('rec-strength');
+  const strength = (rec.strength || '').toUpperCase();
+  strengthEl.textContent = strength;
+  strengthEl.className = strength === 'STRONG' ? 'rec-strength-strong'
+                        : strength === 'MODERATE' ? 'rec-strength-moderate'
+                        : 'text-secondary';
+
+  // Overall score
+  document.getElementById('rec-score-val').textContent =
+    `${rec.score >= 0 ? '+' : ''}${(rec.score * 100).toFixed(1)}%`;
+
+  // Quarter info
+  if (quarter) {
+    document.getElementById('rec-quarter-info').textContent =
+      `Q${quarter.num} · ×${rec.quarter_mult} multiplier · ${quarter.remaining_min}m remaining`;
+  } else {
+    document.getElementById('rec-quarter-info').textContent = '';
+  }
+
+  // Factor bars helper: value is -1..+1, map to 0..100% width
+  function setBar(barId, valId, wId, score, weight) {
+    const bar = document.getElementById(barId);
+    const val = document.getElementById(valId);
+    const wEl = document.getElementById(wId);
+    const pct = Math.abs(score) * 100;
+    bar.style.width = pct.toFixed(1) + '%';
+    bar.className = score > 0.05 ? 'rec-score-fill-pos'
+                  : score < -0.05 ? 'rec-score-fill-neg'
+                  : 'rec-score-fill-neu';
+    val.textContent = `${score >= 0 ? '+' : ''}${(score * 100).toFixed(1)}%`;
+    val.style.color = score > 0.05 ? '#3fb950' : score < -0.05 ? '#f85149' : '#8b949e';
+    if (wEl) wEl.textContent = weight != null ? `(${(weight * 100).toFixed(0)}%)` : '';
+  }
+
+  const s = rec.scores || {};
+  const w = rec.weights || {};
+  setBar('rec-liq-bar', 'rec-liq-val', 'rec-liq-w', s.liquidity ?? 0, w.liquidity);
+  setBar('rec-smt-bar', 'rec-smt-val', 'rec-smt-w', s.smt ?? 0,       w.smt);
+  setBar('rec-tdo-bar', 'rec-tdo-val', 'rec-tdo-w', s.tdo_two ?? 0,   w.tdo_two);
+
+  // Quarter multiplier bar: scale 0..1.3 → 0..100%
+  const qMult = rec.quarter_mult ?? 1.0;
+  const qBar  = document.getElementById('rec-q-bar');
+  qBar.style.width = ((qMult / 1.3) * 100).toFixed(1) + '%';
+  qBar.className = qMult >= 1.0 ? 'rec-score-fill-pos' : 'rec-score-fill-neg';
+  const qVal = document.getElementById('rec-q-val');
+  qVal.textContent = `×${qMult.toFixed(2)}`;
+  qVal.style.color = qMult >= 1.0 ? '#3fb950' : '#ffa657';
+
+  // Reasons
+  const ul = document.getElementById('rec-reasons');
+  ul.innerHTML = '';
+  for (const r of (rec.reasons || [])) {
+    const li = document.createElement('li');
+    li.className = 'rec-reason' + (r.startsWith('✅') || r.startsWith('▲') ? ' pos'
+                                  : r.startsWith('❌') || r.startsWith('▼') ? ' neg' : '');
+    li.textContent = r;
+    ul.appendChild(li);
+  }
+  if (!rec.reasons || !rec.reasons.length) {
+    ul.innerHTML = '<li class="rec-reason text-secondary">No analysis available</li>';
+  }
+
+  // ── Targets ──────────────────────────────────────────────────
+  const tgtCol = document.getElementById('rec-targets-col');
+  const tgtDiv = document.getElementById('rec-targets');
+  if (action !== 'WAIT' && levels && current) {
+    const isLong = action === 'LONG';
+    // Sort levels by value; filter to relevant side
+    const entries = Object.entries(levels)
+      .map(([k, v]) => ({ k, v: Number(v) }))
+      .filter(e => isLong ? e.v > current : e.v < current)
+      .sort((a, b) => isLong ? a.v - b.v : b.v - a.v);  // nearest first
+
+    const entryColor  = isLong ? '#3fb950' : '#f85149';
+    const arrowStr    = isLong ? '▲' : '▼';
+    let html = `<div style="color:#8b949e">Entry: <span style="color:${entryColor};font-weight:700">${current.toFixed(2)}</span></div>`;
+
+    const targets = entries.slice(0, 3);
+    targets.forEach((e, i) => {
+      const diff  = Math.abs(e.v - current).toFixed(2);
+      const color = i === 0 ? entryColor : '#8b949e';
+      html += `<div style="color:${color}">${arrowStr} T${i+1}: <span style="font-weight:${i===0?'700':'400'}">${e.k} ${e.v.toFixed(2)}</span> <span style="color:#8b949e;font-size:.68rem">(${isLong?'+':'-'}${diff})</span></div>`;
+    });
+
+    // Stop: nearest level on the opposite side
+    const stopEntries = Object.entries(levels)
+      .map(([k, v]) => ({ k, v: Number(v) }))
+      .filter(e => isLong ? e.v < current : e.v > current)
+      .sort((a, b) => isLong ? b.v - a.v : a.v - b.v);
+    if (stopEntries.length) {
+      const st = stopEntries[0];
+      html += `<div style="color:#8b949e;margin-top:4px">Stop: <span style="color:#ffa657">${st.k} ${st.v.toFixed(2)}</span></div>`;
+    }
+
+    tgtDiv.innerHTML = html;
+    tgtCol.style.display = 'block';
+  } else {
+    tgtCol.style.display = 'none';
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   API + render pipeline
+════════════════════════════════════════════════════════════════ */
+async function loadData() {
+  const isLive = document.getElementById('mode-live').checked;
+  const params = new URLSearchParams();
+  if (!isLive) {
+    const date = document.getElementById('date-input').value;
+    if (!date) { setStatus('Select a date first', true); return; }
+    params.set('date', date);
+    params.set('hour', selectedHour);
+    params.set('minute', selectedMinute);
+  }
+  params.set('tf', selectedTf);
+  params.set('source', selectedSource);
+
+  document.getElementById('overlay').classList.add('show');
+  setStatus('Loading…', false);
+
+  try {
+    const res = await fetch('/api/scan?' + params.toString());
+    const data = await res.json();
+    if (!res.ok) { setStatus(data.error || 'Error', true); return; }
+    render(data);
+    // Staleness: how old is the last candle?
+    if (data.last_candle) {
+      const lastMs  = new Date(data.last_candle).getTime();
+      const ageMin  = Math.round((Date.now() - lastMs) / 60000);
+      const ageText = ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin/60)}h ${ageMin%60}m ago`;
+      const stale   = ageMin > 30;
+      const el = document.getElementById('sb-candle');
+      el.textContent = `Last candle: ${data.last_candle.slice(11,16)} IL (${ageText})`;
+      el.style.color = stale ? '#f85149' : '#8b949e';
+    }
+    // Twelve Data credit counter
+    const tdEl = document.getElementById('sb-td');
+    if (data.twelvedata) {
+      const td  = data.twelvedata;
+      const pct = td.day_used / td.day_limit;
+      tdEl.textContent = `12Data: ${td.day_used}/${td.day_limit} credits · ${td.scans_remaining} scans left`;
+      tdEl.style.color = pct > 0.8 ? '#f85149' : pct > 0.5 ? '#ffa657' : '#8b949e';
+    } else {
+      tdEl.textContent = '';
+    }
+    setStatus(`OK — ${data.timeframe} · ${data.source || selectedSource}${data.is_historical ? ' (historical)' : ''}`, false);
+  } catch(e) {
+    setStatus('Network error: ' + e.message, true);
+  } finally {
+    document.getElementById('overlay').classList.remove('show');
+  }
+}
+
+async function render(data) {
+  // store current prices for sync calculations
+  mnqCurrent = data.mnq.current;
+  mesCurrent = data.mes.current;
+
+  // top bar
+  document.getElementById('tf-badge').textContent = data.timeframe;
+  document.getElementById('ref-time').textContent = data.ref_time.slice(0,16).replace('T',' ') + ' IL';
+  document.getElementById('mnq-price').textContent = data.mnq.current;
+  document.getElementById('mes-price').textContent = data.mes.current;
+
+  // build both charts (await so listeners attach before user can interact)
+  await Promise.all([
+    buildChart('chart-mnq', data.mnq.candles, data.mnq.levels, data.mnq.fvgs,
+      data.smt_signals, data.mnq.current, 'MNQ', data.hidden_smts || []),
+    buildChart('chart-mes', data.mes.candles, data.mes.levels, data.mes.fvgs,
+      data.smt_signals, data.mes.current, 'MES', data.hidden_smts || []),
+  ]);
+
+  // tables
+  renderQuarters(data.quarters_today);
+  renderLevels(data.mnq.levels, data.mes.levels, data.mnq.current, data.mes.current);
+  renderSmt(data.smt_signals, data.hidden_smts || [], data.fill_smts || []);
+  renderFvgs(data.mnq.fvgs, data.mes.fvgs);
+  renderRecommendation(data.recommendation, data.quarter, data.mnq.levels, data.mnq.current);
+  updateAlertBtn(data);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Live mode auto-refresh
+════════════════════════════════════════════════════════════════ */
+function startLive() {
+  document.getElementById('live-badge').style.display = 'inline-block';
+  clearInterval(liveTimer);
+  loadData();
+  let secondsLeft = LIVE_INTERVAL_MS() / 1000;
+  liveTimer = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft <= 0) {
+      secondsLeft = LIVE_INTERVAL_MS() / 1000;
+      loadData();
+    }
+    document.getElementById('sb-next').textContent = `Next refresh in ${secondsLeft}s`;
+  }, 1000);
+}
+
+function stopLive() {
+  clearInterval(liveTimer);
+  liveTimer = null;
+  document.getElementById('live-badge').style.display = 'none';
+  document.getElementById('sb-next').textContent = '';
+}
+
+function setStatus(msg, isErr) {
+  const el = document.getElementById('sb-status');
+  el.textContent = msg;
+  el.className = isErr ? 'err' : 'ok';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Event listeners
+════════════════════════════════════════════════════════════════ */
+document.getElementById('mode-live').addEventListener('change', () => {
+  document.getElementById('date-controls').classList.add('d-none');
+  startLive();
+});
+
+document.getElementById('mode-date').addEventListener('change', () => {
+  document.getElementById('date-controls').classList.remove('d-none');
+  stopLive();
+  // set today's date as default
+  if (!document.getElementById('date-input').value) {
+    document.getElementById('date-input').value = new Date().toISOString().slice(0,10);
+  }
+});
+
+document.getElementById('scan-btn').addEventListener('click', loadData);
+
+document.getElementById('refresh-btn').addEventListener('click', () => {
+  if (document.getElementById('mode-live').checked) {
+    loadData();
+  } else {
+    loadData();
+  }
+});
+
+function updateStepDisplay() {
+  const el = document.getElementById('step-time');
+  if (el) el.textContent =
+    String(selectedHour).padStart(2,'0') + ':' + String(selectedMinute).padStart(2,'0');
+}
+
+function syncHourButtons() {
+  document.querySelectorAll('.btn-hour').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.hour, 10) === selectedHour));
+}
+
+function stepTime(dir) {
+  const step = TF_MINUTES[selectedTf] || 15;
+  let total  = selectedHour * 60 + selectedMinute + dir * step;
+
+  const dateInput = document.getElementById('date-input');
+  if (total < 0 && dateInput.value) {
+    const d = new Date(dateInput.value + 'T12:00:00');
+    d.setDate(d.getDate() - 1);
+    dateInput.value = d.toISOString().slice(0, 10);
+    total += 24 * 60;
+  } else if (total >= 24 * 60 && dateInput.value) {
+    const d = new Date(dateInput.value + 'T12:00:00');
+    d.setDate(d.getDate() + 1);
+    dateInput.value = d.toISOString().slice(0, 10);
+    total -= 24 * 60;
+  }
+  total = Math.max(0, Math.min(23 * 60 + 59, total));
+
+  selectedHour   = Math.floor(total / 60);
+  selectedMinute = total % 60;
+  syncHourButtons();
+  updateStepDisplay();
+  loadData();
+}
+
+document.querySelectorAll('.btn-hour').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedHour   = parseInt(btn.dataset.hour, 10);
+    selectedMinute = 0;
+    syncHourButtons();
+    updateStepDisplay();
+  });
+});
+
+document.getElementById('step-prev').addEventListener('click', () => stepTime(-1));
+document.getElementById('step-next').addEventListener('click', () => stepTime(+1));
+
+// Keyboard shortcuts: ← → when in date mode and not in a text input
+document.addEventListener('keydown', e => {
+  if (document.getElementById('date-controls').classList.contains('d-none')) return;
+  if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); stepTime(-1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); stepTime(+1); }
+});
+
+document.querySelectorAll('.btn-src').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.btn-src').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedSource = btn.dataset.src;
+    document.getElementById('sb-td').textContent = '';
+    if (document.getElementById('mode-live').checked) {
+      startLive();   // restart with new interval for this source
+    } else {
+      loadData();
+    }
+  });
+});
+
+document.getElementById('lock-btn').addEventListener('click', () => {
+  chartsLocked = !chartsLocked;
+  const btn = document.getElementById('lock-btn');
+  btn.innerHTML  = chartsLocked ? '&#128274; Locked' : '&#128275; Unlocked';
+  btn.className  = chartsLocked
+    ? 'btn btn-sm btn-primary'
+    : 'btn btn-sm btn-outline-secondary';
+});
+
+document.querySelectorAll('.btn-tf').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.btn-tf').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedTf = btn.dataset.tf;
+    loadData();
+  });
+});
+
+/* ── Alert button ─────────────────────────────────────────── */
+document.getElementById('alert-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('alert-btn');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Sending…';
+  try {
+    const res  = await fetch('/api/alert', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok)        { btn.innerHTML = '❌ ' + (data.error || 'Error'); }
+    else if (!data.sent){ btn.innerHTML = '⚠️ ' + (data.reason || 'Not sent'); }
+    else                { btn.innerHTML = `✅ Sent (${data.count})`; }
+  } catch(e) {
+    btn.innerHTML = '❌ Network error';
+  }
+  setTimeout(() => { btn.innerHTML = orig; btn.disabled = !_alertable; }, 3000);
+});
+
+let _alertable = false;
+function updateAlertBtn(data) {
+  const hasSmt = (data.smt_signals?.length || 0)
+               + (data.hidden_smts?.length || 0)
+               + (data.fill_smts?.length   || 0);
+  const action = data.recommendation?.action || 'WAIT';
+  _alertable = hasSmt > 0 || action !== 'WAIT';
+  const btn = document.getElementById('alert-btn');
+  btn.disabled = !_alertable;
+  btn.className = _alertable
+    ? 'btn btn-sm btn-warning'
+    : 'btn btn-sm btn-outline-secondary';
+}
+
+/* ── init ── */
+startLive();
+</script>
+</body>
+</html>

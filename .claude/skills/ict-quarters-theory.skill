@@ -1,0 +1,234 @@
+---
+name: ict-quarters-theory
+description: >
+  Use this skill for any task involving ICT Quarters Theory (תורת הרבעים) — the concept that
+  price follows a hierarchical time structure divided into quarters. Triggers include: calculating
+  or using TDO (True Day Open), TWO (True Week Open), identifying premium/discount zones relative
+  to TDO/TWO, planning trade direction based on weekly or daily bias, understanding session structure
+  (Asia, London, NY Morning, NY Evening), or any mention of "תורת הרבעים", "TDO", "TWO", "פתיחה
+  אמיתית", "True Day Open", "True Week Open", "פרימיום שבועי", "דיסקאונט יומי", "רבעים", "quarters",
+  "סשן לונדון", "סשן אסיה". Always use this skill alongside ict-liquidity-analysis when building
+  or analyzing ICT trade setups that require directional bias (LONG/SHORT) determination.
+---
+ 
+# ICT Quarters Theory — תורת הרבעים
+ 
+## Core Concept
+ 
+Price does NOT move randomly. It follows a **hierarchical time structure** of quarters:
+ 
+```
+Year    → 4 quarters (Q1 Jan–Mar, Q2 Apr–Jun, Q3 Jul–Sep, Q4 Oct–Dec)
+Month   → 4 weeks
+Week    → 4 days (Mon–Thu) + Friday (special)
+Day     → 4 sessions (Asia, London, NY Morning, NY Evening)
+```
+ 
+Each level has a **Quarter 2 open** that serves as the "True Open" — the reference price for
+premium/discount bias at that timeframe.
+ 
+---
+ 
+## Session Structure (Daily Quarters)
+ 
+| Quarter | Session         | ET Time       | Israel Time (UTC+3) |
+|---------|----------------|---------------|----------------------|
+| Q1      | Asia           | 19:00–01:00   | 02:00–08:00          |
+| Q2      | London         | 01:00–07:00   | 08:00–14:00 (07:00 open) |
+| Q3      | NY Morning     | 07:00–13:00   | 14:00–20:00          |
+| Q4      | NY Evening     | 13:00–19:00   | 20:00–02:00          |
+ 
+> Note: Times may vary slightly — use broker session definitions. The key is the 4-session structure.
+ 
+---
+ 
+## True Day Open (TDO) — פתיחה אמיתית של היום
+ 
+**Definition:** The open price of the **first candle of Q2 (London session)**.
+ 
+This is the algorithm's true reference price for the day — not the midnight open.
+ 
+```python
+def get_tdo(df_intraday, date=None):
+    """
+    Get True Day Open = opening price of London session (Q2).
+    
+    df_intraday: DataFrame with intraday OHLCV data, datetime index (ET timezone)
+    date: specific date string 'YYYY-MM-DD', or None for latest trading day
+    
+    London session opens at 01:00 ET (08:00 Israel / 06:00 UTC)
+    """
+    import pandas as pd
+    
+    if date:
+        day_data = df_intraday[df_intraday.index.date == pd.Timestamp(date).date()]
+    else:
+        latest_date = df_intraday.index.date[-1]
+        day_data = df_intraday[df_intraday.index.date == latest_date]
+    
+    # London session starts at 01:00 ET
+    london_candles = day_data[day_data.index.hour == 1]
+    
+    if london_candles.empty:
+        # Fallback: first candle at or after 01:00 ET
+        london_candles = day_data[day_data.index.hour >= 1]
+    
+    if london_candles.empty:
+        return None
+    
+    return london_candles.iloc[0]['open']
+```
+ 
+### TDO Usage
+- Price **above TDO** → **Premium zone** → favor SHORT trades
+- Price **below TDO** → **Discount zone** → favor LONG trades
+- Minimum TP target for intraday trades: price returns to TDO level
+ 
+---
+ 
+## True Week Open (TWO) — פתיחה אמיתית של השבוע
+ 
+**Definition:** The open price of the **first candle of Tuesday** (Q2 of the week).
+ 
+```python
+def get_two(df_intraday, week_start=None):
+    """
+    Get True Week Open = Tuesday's opening price.
+    
+    week_start: Monday date string 'YYYY-MM-DD', or None for current week
+    """
+    import pandas as pd
+    
+    if week_start:
+        monday = pd.Timestamp(week_start)
+    else:
+        today = df_intraday.index[-1]
+        monday = today - pd.Timedelta(days=today.weekday())
+    
+    tuesday = monday + pd.Timedelta(days=1)
+    
+    tuesday_data = df_intraday[df_intraday.index.date == tuesday.date()]
+    
+    if tuesday_data.empty:
+        return None
+    
+    # First candle of Tuesday
+    return tuesday_data.iloc[0]['open']
+```
+ 
+### TWO Usage
+- Price **above TWO** → **Weekly Premium** → favor SHORT for the rest of the week
+- Price **below TWO** → **Weekly Discount** → favor LONG for the rest of the week
+- Minimum TP for swing trades: price returns to TWO level
+ 
+---
+ 
+## Combined Bias Matrix (TDO + TWO)
+ 
+| Weekly Position | Daily Position | Ideal Bias | Action |
+|----------------|----------------|------------|--------|
+| Below TWO (Discount) | Below TDO (Discount) | ✅ **LONG** | Best setup — both confirm |
+| Above TWO (Premium)  | Above TDO (Premium)  | ✅ **SHORT** | Best setup — both confirm |
+| Below TWO (Discount) | Above TDO (Premium)  | ⚠️ Conflict | Need additional confirmation |
+| Above TWO (Premium)  | Below TDO (Discount) | ⚠️ Conflict | Need additional confirmation |
+ 
+```python
+def get_bias(current_price, tdo, two):
+    """
+    Determine directional bias from TDO and TWO.
+    Returns: dict with daily_bias, weekly_bias, combined_bias, confidence
+    """
+    daily_bias  = 'DISCOUNT' if current_price < tdo else 'PREMIUM'
+    weekly_bias = 'DISCOUNT' if current_price < two else 'PREMIUM'
+    
+    daily_direction  = 'LONG'  if daily_bias  == 'DISCOUNT' else 'SHORT'
+    weekly_direction = 'LONG'  if weekly_bias == 'DISCOUNT' else 'SHORT'
+    
+    if daily_direction == weekly_direction:
+        combined = daily_direction
+        confidence = 'HIGH'
+    else:
+        combined = 'NEUTRAL'
+        confidence = 'LOW — conflict between daily and weekly bias'
+    
+    return {
+        'current_price': current_price,
+        'tdo': tdo,
+        'two': two,
+        'daily_bias': daily_bias,
+        'weekly_bias': weekly_bias,
+        'daily_direction': daily_direction,
+        'weekly_direction': weekly_direction,
+        'combined_bias': combined,
+        'confidence': confidence,
+        'tdo_distance_pct': round((current_price - tdo) / tdo * 100, 3),
+        'two_distance_pct': round((current_price - two) / two * 100, 3),
+    }
+```
+ 
+---
+ 
+## Integration with SMT + Liquidity
+ 
+Full trade checklist using all three layers:
+ 
+```
+1. Weekly context:  Is price above or below TWO?
+2. Daily context:   Is price above or below TDO?
+3. Liquidity:       Has external liquidity been swept? (PDH/PDL/PWH/PWL)
+4. SMT signal:      Is there a regular/hidden/fill SMT confirming direction?
+5. Entry:           Use Time Spells (see time-spells-ict skill) for precise candle entry
+```
+ 
+```python
+def full_ict_bias(mnq_df, mes_df, timeframe='30m'):
+    """
+    Full bias analysis: TWO + TDO + SMT combined.
+    """
+    from ict_liquidity import detect_smt, get_external_liquidity  # from ict-liquidity-analysis skill
+    
+    current_price = mnq_df['close'].iloc[-1]
+    tdo = get_tdo(mnq_df)
+    two = get_two(mnq_df)
+    
+    bias = get_bias(current_price, tdo, two) if tdo and two else {}
+    
+    ext_levels = get_external_liquidity(mnq_df, 'day')
+    ext_levels.update(get_external_liquidity(mnq_df, 'week'))
+    
+    smt_signals = detect_smt(mnq_df, mes_df)
+    latest_smt  = smt_signals[-1] if smt_signals else None
+    
+    return {
+        'bias': bias,
+        'external_liquidity': ext_levels,
+        'latest_smt': latest_smt,
+        'trade_ready': (
+            bias.get('confidence') == 'HIGH' and
+            latest_smt is not None and
+            bias.get('combined_bias') == latest_smt.get('direction')
+        )
+    }
+```
+ 
+---
+ 
+## Key Rules Summary
+ 
+| Concept | Hebrew | Rule |
+|---------|--------|------|
+| TDO | פתיחה אמיתית יומית | Open of first London candle |
+| TWO | פתיחה אמיתית שבועית | Open of first Tuesday candle |
+| Above TDO | פרימיום יומי | Favor SHORT |
+| Below TDO | דיסקאונט יומי | Favor LONG |
+| Above TWO | פרימיום שבועי | Favor SHORT all week |
+| Below TWO | דיסקאונט שבועי | Favor LONG all week |
+| Conflict | ניגוד יומי/שבועי | Need extra confirmation — not ideal |
+| Min target | יעד מינימלי | Return to TDO (intraday) / TWO (swing) |
+ 
+---
+ 
+## Related Skills
+ 
+- **ict-liquidity-analysis** — SMT detection, FVG/GAP, External Liquidity levels
+- **time-spells-ict** — Precise entry timing using time-matched candles
