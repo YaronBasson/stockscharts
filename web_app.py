@@ -247,31 +247,6 @@ def _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=None):
 
 
 
-@app.route("/api/debug-env")
-def api_debug_env():
-    """Check env vars are loaded (shows only whether set, not the actual values)."""
-    import os
-    token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    try:
-        from pathlib import Path
-        env_path = Path(__file__).parent / '.env'
-        env_exists = env_path.exists()
-        env_content_preview = []
-        if env_exists:
-            for line in env_path.read_text(encoding='utf-8').splitlines():
-                if line.strip() and not line.startswith('#'):
-                    key = line.split('=')[0].strip()
-                    env_content_preview.append(key)
-    except Exception as e:
-        env_exists = f"error: {e}"
-        env_content_preview = []
-    return jsonify({
-        "TELEGRAM_BOT_TOKEN": f"SET ({len(token)} chars)" if token else "EMPTY",
-        "TELEGRAM_CHAT_ID":   f"SET ({len(chat_id)} chars)" if chat_id else "EMPTY",
-        "env_file_exists":    env_exists,
-        "env_keys_found":     env_content_preview,
-    })
 
 
 @app.route("/api/alert", methods=["POST"])
