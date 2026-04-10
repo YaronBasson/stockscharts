@@ -391,19 +391,21 @@ def detect_fvg(df: pd.DataFrame) -> list:
 
         if float(c3["low"]) > float(c1["high"]):
             gap = {
-                "type":   "bullish",
-                "bottom": round(float(c1["high"]), 2),
-                "top":    round(float(c3["low"]),  2),
-                "time":   df.index[i],
-                "filled": False
+                "type":       "bullish",
+                "bottom":     round(float(c1["high"]), 2),
+                "top":        round(float(c3["low"]),  2),
+                "time":       df.index[i],        # c2 — for table display
+                "start_time": df.index[i + 1],    # c3 — first candle where gap is visible
+                "filled":     False
             }
         elif float(c3["high"]) < float(c1["low"]):
             gap = {
-                "type":   "bearish",
-                "bottom": round(float(c3["high"]), 2),
-                "top":    round(float(c1["low"]),  2),
-                "time":   df.index[i],
-                "filled": False
+                "type":       "bearish",
+                "bottom":     round(float(c3["high"]), 2),
+                "top":        round(float(c1["low"]),  2),
+                "time":       df.index[i],
+                "start_time": df.index[i + 1],
+                "filled":     False
             }
 
         if gap:
@@ -719,12 +721,14 @@ def detect_fill_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
         if mnq_in and not mes_in:
             signals.append({
                 "type": "fill_smt_type1", "direction": direction, "time": cur_time,
-                "detail": f"Fill SMT Type1: MNQ entered {fvg['type']} FVG, MES did not touch → {direction.split()[0]}"
+                "fvg_instrument": "MNQ", "fvg_bottom": fvg["bottom"], "fvg_top": fvg["top"], "fvg_type": fvg["type"], "fvg_start_time": fvg.get("start_time"),
+                "detail": f"Fill SMT Type1: MNQ entered {fvg['type']} FVG [{fvg['bottom']:.2f}–{fvg['top']:.2f}], MES did not touch → {direction.split()[0]}"
             })
         elif mnq_in and mes_thru:
             signals.append({
                 "type": "fill_smt_type2", "direction": direction, "time": cur_time,
-                "detail": f"Fill SMT Type2: MNQ in FVG, MES passed through → {direction.split()[0]}"
+                "fvg_instrument": "MNQ", "fvg_bottom": fvg["bottom"], "fvg_top": fvg["top"], "fvg_type": fvg["type"], "fvg_start_time": fvg.get("start_time"),
+                "detail": f"Fill SMT Type2: MNQ in FVG [{fvg['bottom']:.2f}–{fvg['top']:.2f}], MES passed through → {direction.split()[0]}"
             })
 
     for fvg in mes_fvgs:
@@ -735,12 +739,14 @@ def detect_fill_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
         if mes_in and not mnq_in:
             signals.append({
                 "type": "fill_smt_type1", "direction": direction, "time": cur_time,
-                "detail": f"Fill SMT Type1: MES entered {fvg['type']} FVG, MNQ did not touch → {direction.split()[0]}"
+                "fvg_instrument": "MES", "fvg_bottom": fvg["bottom"], "fvg_top": fvg["top"], "fvg_type": fvg["type"], "fvg_start_time": fvg.get("start_time"),
+                "detail": f"Fill SMT Type1: MES entered {fvg['type']} FVG [{fvg['bottom']:.2f}–{fvg['top']:.2f}], MNQ did not touch → {direction.split()[0]}"
             })
         elif mes_in and mnq_thru:
             signals.append({
                 "type": "fill_smt_type2", "direction": direction, "time": cur_time,
-                "detail": f"Fill SMT Type2: MES in FVG, MNQ passed through → {direction.split()[0]}"
+                "fvg_instrument": "MES", "fvg_bottom": fvg["bottom"], "fvg_top": fvg["top"], "fvg_type": fvg["type"], "fvg_start_time": fvg.get("start_time"),
+                "detail": f"Fill SMT Type2: MES in FVG [{fvg['bottom']:.2f}–{fvg['top']:.2f}], MNQ passed through → {direction.split()[0]}"
             })
 
     return signals

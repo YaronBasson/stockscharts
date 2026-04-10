@@ -431,41 +431,42 @@ const listenersAttached = {};
 const INTERVAL_BY_SOURCE = { yfinance:60_000, twelvedata:300_000 };
 const LIVE_INTERVAL_MS   = () => INTERVAL_BY_SOURCE[selectedSource] ?? 60_000;
 
-/* ── Sync logic ─────────────────────────────────────────────── */
-function syncCharts(srcDiv, ed) {
+/* ── Chart sync helpers ──────────────────────────────────────── */
+
+function otherDiv(divId) {
+  return divId === 'chart-mnq' ? 'chart-mes' : 'chart-mnq';
+}
+
+// Mirror any update dict to the other chart (always — used for button actions)
+function mirrorToOther(srcDiv, update) {
+  if (isSyncing) return;
+  isSyncing = true;
+  Plotly.relayout(otherDiv(srcDiv), update).then(() => { isSyncing = false; });
+}
+
+// Sync pan/drag/scroll when charts are locked — mirrors X exactly, Y proportionally
+function syncLockedMovement(srcDiv, x0, x1, y0, y1) {
   if (!chartsLocked || isSyncing) return;
   isSyncing = true;
-
-  const tgtDiv = srcDiv === 'chart-mnq' ? 'chart-mes' : 'chart-mnq';
+  const tgtDiv = otherDiv(srcDiv);
   const update = {};
 
-  // X-axis (time) — mirror exactly
-  if (ed['xaxis.range[0]'] !== undefined) {
-    update['xaxis.range[0]'] = ed['xaxis.range[0]'];
-    update['xaxis.range[1]'] = ed['xaxis.range[1]'];
-  } else if (ed['xaxis.autorange'] === true) {
-    update['xaxis.autorange'] = true;
+  if (x0 !== undefined) {
+    update['xaxis.range[0]'] = x0;
+    update['xaxis.range[1]'] = x1;
   }
-
-  // Y-axis — proportional to price ratio so visual % range matches
-  if (ed['yaxis.range[0]'] !== undefined) {
-    const srcY0  = ed['yaxis.range[0]'];
-    const srcY1  = ed['yaxis.range[1]'];
-    const srcMid = (srcY0 + srcY1) / 2;
-    const srcRng = srcY1 - srcY0;
-
+  if (y0 !== undefined) {
+    const srcMid = (y0 + y1) / 2;
+    const srcRng = y1 - y0;
     const [srcCur, tgtCur] = srcDiv === 'chart-mnq'
-      ? [mnqCurrent, mesCurrent]
-      : [mesCurrent, mnqCurrent];
-
+      ? [mnqCurrent, mesCurrent] : [mesCurrent, mnqCurrent];
     if (srcCur && tgtCur) {
       const ratio  = tgtCur / srcCur;
-      const tgtRng = srcRng * ratio;
-      const tgtMid = tgtCur * (srcMid / srcCur);   // proportional center
-      update['yaxis.range[0]'] = tgtMid - tgtRng / 2;
-      update['yaxis.range[1]'] = tgtMid + tgtRng / 2;
+      const tgtMid = tgtCur * (srcMid / srcCur);
+      update['yaxis.range[0]'] = tgtMid - srcRng * ratio / 2;
+      update['yaxis.range[1]'] = tgtMid + srcRng * ratio / 2;
     }
-  } else if (ed['yaxis.autorange'] === true) {
+  } else {
     update['yaxis.autorange'] = true;
   }
 
@@ -681,7 +682,7 @@ function savedZoom(divId) {
   };
 }
 
-async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice, ticker, hiddenSmts = []) {
+async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice, ticker, hiddenSmts = [], fillSmts = []) {
   const zoom = savedZoom(divId);   // capture before react() resets it (also sets chartWasDefault)
   if (candles.length) chartLatestTime[divId] = candles[candles.length - 1].t;
   const ts   = candles.map(c => c.t);
@@ -719,15 +720,31 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
     });
   }
 
-  // ── FVG rectangles ──
-  const fvgShapes = fvgs.map(f => ({
-    type:'rect', xref:'paper', yref:'y',
-    x0:0, x1:1,
+  // Last candle time — FVG rects and hidden SMT line extend to here
+  const lastCandleT = candles.length ? candles[candles.length - 1].t : null;
+
+  // ── FVG rectangles — start at gap formation (c3), extend to last candle ──
+  const fvgShapes = lastCandleT ? fvgs.map(f => ({
+    type:'rect', xref:'x', yref:'y',
+    x0: f.start_time, x1: lastCandleT,
     y0: f.bottom, y1: f.top,
     fillcolor: f.type === 'bullish' ? '#3fb95022' : '#f8514922',
     line:{width:0},
     layer:'below',
-  }));
+  })) : [];
+
+  // ── Fill SMT: highlight the triggering FVG with a bright border ──
+  const fillSmtFvgShapes = lastCandleT ? fillSmts
+    .filter(s => s.fvg_instrument === ticker && s.fvg_bottom != null)
+    .map(s => ({
+      type:'rect', xref:'x', yref:'y',
+      x0: s.fvg_start_time || lastCandleT,
+      x1: lastCandleT,
+      y0: s.fvg_bottom, y1: s.fvg_top,
+      fillcolor: s.fvg_type === 'bullish' ? '#3fb95044' : '#f8514944',
+      line:{ color: s.fvg_type === 'bullish' ? '#3fb950' : '#f85149', width:1.5, dash:'dot' },
+      layer:'below',
+    })) : [];
 
   // ── SMT annotation markers ──
   const smtAnnotations = smtSignals.map(s => {
@@ -763,7 +780,6 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
   // ── Hidden SMT reference line — most recent signal only ──────
   const hiddenRefShapes      = [];
   const hiddenRefAnnotations = [];
-  const lastCandleT = candles.length ? candles[candles.length - 1].t : null;
 
   // Only draw for the single most-recent hidden SMT
   const sortedHidden = [...hiddenSmts].sort((a, b) => b.time > a.time ? 1 : -1);
@@ -812,7 +828,7 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
       tickformat:',.0f',
       side:'left',
     },
-    shapes:[...quarterShapes, ...levelShapes, ...fvgShapes, ...hiddenRefShapes],
+    shapes:[...quarterShapes, ...levelShapes, ...fvgShapes, ...fillSmtFvgShapes, ...hiddenRefShapes],
     annotations:[...quarterAnnotations, ...levelAnnotations, ...smtAnnotations, ...hiddenRefAnnotations, priceAnnotation],
     font:{family:'Segoe UI, system-ui, sans-serif', color:'#e6edf3'},
     hovermode: false,
@@ -838,46 +854,63 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
   // Attach relayout listener once — reattaching would stack callbacks
   if (!listenersAttached[divId]) {
     document.getElementById(divId).on('plotly_relayout', ed => {
-      if (isSyncing) return;  // ignore events caused by our own Plotly.relayout calls
+      if (isSyncing) return;
 
-      // User reset to full view (double-click / Reset axes) → mark as default again
-      if (ed['xaxis.autorange'] === true) {
-        chartWasDefault[divId] = true;
-        syncCharts(divId, ed);
+      // ── 1. Modebar mode button (pan ↔ zoom) — always mirror ──────
+      if (ed.dragmode !== undefined) {
+        mirrorToOther(divId, { dragmode: ed.dragmode });
         return;
       }
 
-      // User zoomed from default (full) view → recenter so current time sits at 2/3
-      if (chartWasDefault[divId] && ed['xaxis.range[0]'] !== undefined) {
+      // ── 2. Reset axes (double-click or Reset button) — always mirror
+      if (ed['xaxis.autorange'] === true) {
+        chartWasDefault[divId] = true;
+        mirrorToOther(divId, { 'xaxis.autorange': true, 'yaxis.autorange': true });
+        return;
+      }
+
+      // ── 3. Modebar zoom in / zoom out — array form — always mirror ─
+      if (Array.isArray(ed['xaxis.range'])) {
+        const [x0, x1] = ed['xaxis.range'];
+        chartWasDefault[divId] = false;
+        mirrorToOther(divId, {
+          'xaxis.range[0]': x0,
+          'xaxis.range[1]': x1,
+          'yaxis.autorange': true,
+        });
+        return;
+      }
+
+      // ── 4. Drag / scroll zoom — string key form ───────────────────
+      const x0 = ed['xaxis.range[0]'];
+      const x1 = ed['xaxis.range[1]'];
+      const y0 = ed['yaxis.range[0]'];
+      const y1 = ed['yaxis.range[1]'];
+
+      // First zoom from default view → recenter so latest candle sits at 2/3
+      if (chartWasDefault[divId] && x0 !== undefined) {
         chartWasDefault[divId] = false;
         const latest = chartLatestTime[divId];
         if (latest) {
-          const span    = new Date(ed['xaxis.range[1]']).getTime()
-                        - new Date(ed['xaxis.range[0]']).getTime();
-          const latestMs = new Date(latest).getTime();
-          const newX1   = latestMs + span / 3;   // 1/3 of span after latest → current at 2/3
+          const span    = new Date(x1).getTime() - new Date(x0).getTime();
+          const newX1   = new Date(latest).getTime() + span / 3;
           const newX0   = newX1 - span;
-          const tgtDiv  = divId === 'chart-mnq' ? 'chart-mes' : 'chart-mnq';
+          const x0iso   = new Date(newX0).toISOString();
+          const x1iso   = new Date(newX1).toISOString();
           isSyncing = true;
+          const recentered = { 'xaxis.range[0]': x0iso, 'xaxis.range[1]': x1iso, 'yaxis.autorange': true };
+          const tgtDiv = otherDiv(divId);
           Promise.all([
-            Plotly.relayout(divId, {
-              'xaxis.range[0]': new Date(newX0).toISOString(),
-              'xaxis.range[1]': new Date(newX1).toISOString(),
-              'yaxis.autorange': true,
-            }),
-            chartsLocked ? Plotly.relayout(tgtDiv, {
-              'xaxis.range[0]': new Date(newX0).toISOString(),
-              'xaxis.range[1]': new Date(newX1).toISOString(),
-              'yaxis.autorange': true,
-            }) : Promise.resolve(),
+            Plotly.relayout(divId, recentered),
+            chartsLocked ? Plotly.relayout(tgtDiv, recentered) : Promise.resolve(),
           ]).then(() => { isSyncing = false; });
           return;
         }
       }
 
-      // Normal zoom/pan while already in a custom view → sync as usual
+      // Normal pan / scroll while in custom view → only sync if locked
       chartWasDefault[divId] = false;
-      syncCharts(divId, ed);
+      syncLockedMovement(divId, x0, x1, y0, y1);
     });
     listenersAttached[divId] = true;
   }
@@ -1101,13 +1134,22 @@ function renderSmt(signals, hiddenSmts, fillSmts) {
   const hasVals = s.mnq_val != null && s.ref_mnq != null;
   const mnqLbl = s.ref_mnq_label || 'ref';
   const mesLbl = s.ref_mes_label || 'ref';
+  const hasFvg  = s.fvg_bottom != null && s.fvg_top != null;
+  const fvgColor = s.fvg_type === 'bullish' ? '#3fb950' : '#f85149';
+  const fvgLine  = hasFvg ? `
+    <div style="margin-top:4px; font-size:.72rem;">
+      <span style="color:${fvgColor}">▣ Gap (${s.fvg_instrument}):</span>
+      <span class="val"> ${s.fvg_bottom.toFixed(2)} – ${s.fvg_top.toFixed(2)}</span>
+      <span style="color:#8b949e; font-size:.68rem;"> (size: ${(s.fvg_top - s.fvg_bottom).toFixed(2)})</span>
+    </div>` : '';
   body.innerHTML = hasVals ? `
     <div><span class="lbl">MNQ: </span><span class="val swept">${s.mnq_val.toFixed(2)}</span>
          <span class="lbl"> ${mnqLbl}: </span><span class="val">${s.ref_mnq.toFixed(2)}</span></div>
     <div><span class="lbl">MES: </span><span class="val swept">${s.mes_val.toFixed(2)}</span>
          <span class="lbl"> ${mesLbl}: </span><span class="val">${s.ref_mes.toFixed(2)}</span></div>
+    ${fvgLine}
     <div style="margin-top:4px; color:#ccc; font-size:.7rem">${s.detail}</div>
-  ` : `<div style="color:#ccc; font-size:.7rem">${s.detail}</div>`;
+  ` : `${fvgLine}<div style="color:#ccc; font-size:.7rem">${s.detail}</div>`;
 
   // Table — all signals
   for (const s of all) {
@@ -1335,9 +1377,9 @@ async function render(data) {
   // build both charts (await so listeners attach before user can interact)
   await Promise.all([
     buildChart('chart-mnq', data.mnq.candles, data.mnq.levels, data.mnq.fvgs,
-      data.smt_signals, data.mnq.current, 'MNQ', data.hidden_smts || []),
+      data.smt_signals, data.mnq.current, 'MNQ', data.hidden_smts || [], data.fill_smts || []),
     buildChart('chart-mes', data.mes.candles, data.mes.levels, data.mes.fvgs,
-      data.smt_signals, data.mes.current, 'MES', data.hidden_smts || []),
+      data.smt_signals, data.mes.current, 'MES', data.hidden_smts || [], data.fill_smts || []),
   ]);
 
   // tables
@@ -1527,10 +1569,22 @@ document.querySelectorAll('.btn-src').forEach(btn => {
 document.getElementById('lock-btn').addEventListener('click', () => {
   chartsLocked = !chartsLocked;
   const btn = document.getElementById('lock-btn');
-  btn.innerHTML  = chartsLocked ? '&#128274; Locked' : '&#128275; Unlocked';
-  btn.className  = chartsLocked
-    ? 'btn btn-sm btn-primary'
-    : 'btn btn-sm btn-outline-secondary';
+  btn.innerHTML = chartsLocked ? '&#128274; Locked' : '&#128275; Unlocked';
+  btn.className = chartsLocked ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-secondary';
+
+  // When locking: align MES to MNQ's current X view
+  if (chartsLocked) {
+    const mnqLayout = document.getElementById('chart-mnq')._fullLayout;
+    if (mnqLayout && mnqLayout.xaxis.range) {
+      const [x0, x1] = mnqLayout.xaxis.range;
+      isSyncing = true;
+      Plotly.relayout('chart-mes', {
+        'xaxis.range[0]': x0,
+        'xaxis.range[1]': x1,
+        'yaxis.autorange': true,
+      }).then(() => { isSyncing = false; });
+    }
+  }
 });
 
 document.querySelectorAll('.btn-tf').forEach(btn => {

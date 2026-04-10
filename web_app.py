@@ -161,10 +161,11 @@ def df_to_candles(df):
 
 def fvg_to_dict(f):
     return {
-        "type":   f["type"],
-        "bottom": f["bottom"],
-        "top":    f["top"],
-        "time":   f["time"].isoformat(),
+        "type":       f["type"],
+        "bottom":     f["bottom"],
+        "top":        f["top"],
+        "time":       f["time"].isoformat(),
+        "start_time": f["start_time"].isoformat(),
     }
 
 
@@ -200,10 +201,15 @@ def hidden_smt_to_dict(s):
 
 def fill_smt_to_dict(s):
     return {
-        "subtype":   s["type"],
-        "direction": s["direction"],
-        "time":      s["time"].isoformat(),
-        "detail":    s["detail"],
+        "subtype":        s["type"],
+        "direction":      s["direction"],
+        "time":           s["time"].isoformat(),
+        "detail":         s["detail"],
+        "fvg_instrument":  s.get("fvg_instrument"),
+        "fvg_bottom":      s.get("fvg_bottom"),
+        "fvg_top":         s.get("fvg_top"),
+        "fvg_type":        s.get("fvg_type"),
+        "fvg_start_time":  s["fvg_start_time"].isoformat() if s.get("fvg_start_time") else None,
     }
 
 
