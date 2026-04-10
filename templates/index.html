@@ -444,6 +444,19 @@ function mirrorToOther(srcDiv, update) {
   Plotly.relayout(otherDiv(srcDiv), update).then(() => { isSyncing = false; });
 }
 
+// Switch both charts to pan mode (deferred so it runs after any in-flight sync)
+function switchToPanMode() {
+  setTimeout(() => {
+    const curMode = document.getElementById('chart-mnq')?._fullLayout?.dragmode;
+    if (curMode === 'pan') return;   // already in pan, nothing to do
+    isSyncing = true;
+    Promise.all([
+      Plotly.relayout('chart-mnq', { dragmode: 'pan' }),
+      Plotly.relayout('chart-mes', { dragmode: 'pan' }),
+    ]).then(() => { isSyncing = false; });
+  }, 0);
+}
+
 // Sync pan/drag/scroll when charts are locked — mirrors X exactly, Y proportionally
 function syncLockedMovement(srcDiv, x0, x1, y0, y1) {
   if (!chartsLocked || isSyncing) return;
@@ -904,6 +917,7 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
             Plotly.relayout(divId, recentered),
             chartsLocked ? Plotly.relayout(tgtDiv, recentered) : Promise.resolve(),
           ]).then(() => { isSyncing = false; });
+          switchToPanMode();
           return;
         }
       }
@@ -911,6 +925,8 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
       // Normal pan / scroll while in custom view → only sync if locked
       chartWasDefault[divId] = false;
       syncLockedMovement(divId, x0, x1, y0, y1);
+      // After any scroll/drag zoom, switch both charts to pan (move) mode
+      if (x0 !== undefined) switchToPanMode();
     });
     listenersAttached[divId] = true;
   }
@@ -1019,6 +1035,7 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
         'yaxis.range':     [mid - half, mid + half],
         'yaxis.autorange': false,
       });
+      switchToPanMode();
     }, { passive: false });
 
     hoverListeners[divId] = true;

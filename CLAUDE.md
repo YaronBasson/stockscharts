@@ -4,30 +4,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Real-time automated trading alert system monitoring MNQ (Micro E-mini Nasdaq-100) and MES (Micro E-mini S&P 500) micro futures for ICT (Inner Circle Trading) signals: SMT divergences, Fair Value Gaps (FVG), and external liquidity levels.
+Real-time automated trading alert system monitoring MNQ (Micro E-mini Nasdaq-100) and MES (Micro E-mini S&P 500) micro futures for ICT (Inner Circle Trading) signals: SMT divergences, Fair Value Gaps (FVG), and external liquidity levels. Includes a Flask web dashboard (`web_app.py`) with interactive Plotly charts.
 
-## Running the Agent
+## Running
 
 ```bash
+# Web dashboard (primary interface)
+python web_app.py          # opens http://localhost:8080
+
+# CLI agent only
 pip install yfinance pandas requests colorama schedule
 python ict_smt_agent.py                        # live mode
-python ict_smt_agent.py --date 2026-03-31      # date mode: 2 days, cutoff 15:00 IL
-python ict_smt_agent.py --simulate "2026-03-31 15:30"  # legacy simulate
+python ict_smt_agent.py --date 2026-03-31      # date mode: cutoff 15:00 IL
+python ict_smt_agent.py --simulate "2026-03-31 15:30"  # explicit cutoff
 ```
 
 Stop with Ctrl+C. No build step or tests exist.
 
-## Operating Modes
+## Secrets / Environment
+
+All credentials live in `.env` (gitignored). Copy `.env.example` or create manually:
+
+```
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+TWELVEDATA_API_KEY=...
+POLYGON_API_KEY=...
+```
+
+`web_app.py` loads `.env` with a manual `utf-8-sig` parser (handles Windows BOM) before importing `ict_smt_agent`.
+
+## Operating Modes (CLI)
 
 **Live mode** (default): scans every `SCAN_INTERVAL_SECONDS` with real-time data.
 
-**Date mode** (`--date YYYY-MM-DD`): fetches 2 days of historical data including the given date, cuts off at **15:00 Israel time** on that date, runs a single analysis. Telegram alerts are suppressed. Designed for reviewing the Q3 setup before the NY Open.
+**Date mode** (`--date YYYY-MM-DD`): fetches historical data, cuts off at **15:00 Israel time** on that date, runs a single analysis. Telegram alerts are suppressed.
 
 **Simulate mode** (`--simulate "YYYY-MM-DD HH:MM"`): same as date mode but with an explicit cutoff time (Israel time).
 
-## Quarter System (Israel Time)
+## Web Dashboard Features
 
-The trading day is divided into 4 quarters. All times are Israel time:
+- Dual Plotly candlestick charts (MNQ + MES) with synchronized zoom/pan
+- FVG rectangles drawn from gap formation candle (c3) to last candle — disappear when filled
+- SMT alert box: Regular, Hidden, Fill types with ref label (e.g. "swing high @15:30")
+- Fill SMT: highlights triggering FVG with bright border + shows gap range in alert box
+- Recommendation panel with entry/target/stop levels
+- Quarters table (Q1–Q4 H/L for today)
+- Levels table (PDH/PDL, TDO, TWO, HOD/LOD, Q1–Q4 H/L, NYO)
+- Manual Telegram alert button (bypasses dedup, works in historical mode)
+- Auto-pause: scanning stops 23:00–14:00 IL (NYSE closed); manual ⏸/▶ button override
+- Step buttons (◄/►) to move through historical data by one timeframe interval
+- Glossary modal for ICT acronyms
+- Chart lock/unlock: locked = all movements sync; unlocked = only modebar buttons sync
+- Scroll zoom automatically switches both charts to pan (move) mode
+
+## Quarter System (Israel Time)
 
 | Quarter | Hours | Notes |
 |---|---|---|
@@ -38,50 +69,54 @@ The trading day is divided into 4 quarters. All times are Israel time:
 
 Gap: **00:00–01:00** — no quarters defined.
 
-**Typical usage:** view the agent at ~15:30 IL (Q3). Date mode cuts data at 15:00 IL so all signals and levels reflect what was visible before the NY Open. Signals shown in Q3 are framed as targets valid until 19:00 IL.
-
-Each scan displays:
-- A `TODAY'S QUARTERS` table with H/L per completed or in-progress quarter
-- Quarter H/L levels (`Q1H`, `Q1L`, … `Q4H`, `Q4L`) in the sorted levels list
-- Current quarter, its time range, and minutes remaining
-- SMT section labelled with the quarter-end target time
-
 ## Configuration (top of `ict_smt_agent.py`)
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | `""` | Optional Telegram alerts |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | `""` | Read from `.env` |
 | `SCAN_INTERVAL_SECONDS` | `60` | Scan frequency |
-| `TIMEFRAME` | `"15m"` | Candle interval (`1m`, `5m`, `15m`, `30m`, `1h`) |
-| `LOOKBACK_DAYS` | `2` | Historical data window |
-| `SMT_LOOKBACK_CANDLES` | `10` | Rolling window for divergence detection |
-| `SMT_TOLERANCE_PCT` | `0.0015` | Sweep detection tolerance (0.15%) |
+| `TIMEFRAME` | `"15m"` | Candle interval |
+| `LOOKBACK_DAYS` | `3` | Display window (days) |
+| `SWING_LOOKBACK_DAYS` | `7` | Data window for swing detection |
+| `SMT_LOOKBACK_CANDLES` | `10` | Rolling window fallback for SMT |
+| `SMT_TOLERANCE_PCT` | `0.0015` | Sweep tolerance (0.15%) |
+| `SWING_STRENGTH` | `2` | Candles each side for swing high/low detection |
+| `DATA_SOURCE` | `"yfinance"` | `"yfinance"` or `"twelvedata"` |
+| `TWELVEDATA_API_KEY` | `""` | Read from `.env` |
 
 ## Architecture
 
-Single file (`ict_smt_agent.py`, ~600 lines), no separate modules:
+Two main files + one template:
 
+### `ict_smt_agent.py` (~700+ lines)
 **Data pipeline:**
-1. `fetch_data()` — downloads OHLCV via yfinance, converts UTC → Israel time
-2. `get_external_levels(df, ref_time)` — computes PDH/PDL, TDO, TWO, HOD/LOD, PWH/PWL, NYO, and Q1–Q4 H/L for each index; `ref_time` controls the cutoff (defaults to `datetime.now()`)
-   - **TDO** = Today's Open (daily open of the current day)
-   - **TWO** = This Week's Open (weekly open of the current week)
-3. `detect_fvg()` — finds active (unfilled) Fair Value Gaps: bullish when `c3.low > c1.high`, bearish when `c3.high < c1.low`
-4. `detect_smt()` — core signal: compares MNQ vs MES against external levels; bullish when MNQ sweeps below a level while MES holds, bearish for the inverse
-5. `run_scan(sim_time, date_mode)` — orchestrates the full analysis loop, deduplicates alerts, outputs to terminal + optional Telegram; Telegram is suppressed in date mode
+1. `fetch_data()` — downloads OHLCV via yfinance or Twelve Data, converts UTC → Israel time; caches for `CACHE_TTL=55s`
+2. `get_external_levels(df, ref_time)` — PDH/PDL, TDO, TWO, HOD/LOD, PWH/PWL, NYO, Q1–Q4 H/L
+3. `detect_fvg()` — active (unfilled) Fair Value Gaps; each has `time` (c2) and `start_time` (c3, for chart drawing)
+4. `detect_smt()` — Regular SMT: uses `find_nearest_liquidity()` for swing high/low reference (falls back to rolling window); signals include `ref_mnq_label` / `ref_mes_label` (e.g. "swing high @15:30" or "rolling high @14:45")
+5. `detect_hidden_smt()` — same but uses candle bodies (open/close), not wicks
+6. `detect_fill_smt()` — divergence in how each instrument interacts with its FVG zone
+7. `compute_recommendation()` — weighted score → LONG/SHORT/WAIT with strength
 
-**Quarter helpers:**
-- `get_quarter(dt)` — returns `(q_num, start_h, end_h)` for the given Israel-time datetime, or `None` if in the 00:00–01:00 gap
-- `quarter_range_str(s, e)` — formats a quarter range as `"HH:00–HH:00"`
-- `quarter_end_dt(ref_dt, end_h)` — returns a timezone-aware datetime for the end of a quarter
+**Key helpers:**
+- `find_nearest_liquidity(df, swing_strength)` — finds most recent swing high/low to the left of current candle
+- `send_telegram()` — returns `(bool, str)` tuple; reads token live from `os.getenv()`
+- `get_quarter(dt)`, `quarter_range_str()`, `quarter_end_dt()` — quarter time helpers
 
-**State (module-level dicts):**
-- `last_smt_signal` — deduplicates SMT alerts within 30 minutes
-- `last_fvg_alert` — tracks alerted FVGs by gap ID to suppress repeats
+**State:** `last_smt_signal`, `last_fvg_alert` — dedup dicts; reset on restart.
 
-**Key design choices:**
-- Single-threaded; network delays block the schedule loop
-- No persistence — all state resets on restart
-- yfinance is the sole data source (no API key, no fallback)
-- Mixed Hebrew/English output in terminal and Telegram messages
-- Timezones: `Asia/Jerusalem` for display, `America/New_York` for NYO reference
+### `web_app.py`
+- Flask app on `127.0.0.1:8080`, `debug=False`
+- `GET /api/scan` — full analysis; returns candles, levels, signals, recommendation
+  - Pause guard: returns `{paused, reason, resume_at}` during 23:00–14:00 IL in live mode
+- `POST /api/pause` — toggle/set pause state; body `{action: "pause"|"resume"|"toggle"|"auto"}`
+- `POST /api/alert` — manual Telegram send from `_last_scan_ctx`
+- Auto-pause constants: `AUTO_PAUSE_START=23`, `AUTO_PAUSE_END=14`
+- Twelve Data credit tracking: `TD_CREDITS_PER_SCAN=9`, `TD_DAILY_LIMIT=800`
+
+### `templates/index.html`
+- Bootstrap 5 + Plotly.js
+- Chart sync: `chartsLocked` flag; modebar buttons (zoom/pan/reset) always mirror; drag/scroll only syncs when locked; re-locking aligns MES to MNQ's view
+- `switchToPanMode()` — called after scroll zoom to auto-switch both charts to pan mode
+- FVG shapes: `xref:'x'`, `x0=start_time`, `x1=lastCandleT` — not full-width
+- Fill SMT highlighted FVG: brighter fill + dotted border on the triggering instrument's chart
