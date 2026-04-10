@@ -60,6 +60,31 @@ _last_rec_alert: dict = {}
 # ── Last scan context (for manual Telegram trigger) ───────────
 _last_scan_ctx: dict = {}
 
+# ── Pause state ───────────────────────────────────────────────
+# Auto-pause: NYSE closes ~23:00 IL; resume at 14:00 IL.
+# Manual override: user button toggles _pause_manual (True/False).
+# None means "follow auto logic".
+AUTO_PAUSE_START = 23   # hour IL — pause from here
+AUTO_PAUSE_END   = 14   # hour IL — resume at this hour
+
+_pause_manual: bool | None = None   # None = auto, True/False = manual override
+
+def _auto_paused() -> bool:
+    h = datetime.now(ISRAEL_TZ).hour
+    return h >= AUTO_PAUSE_START or h < AUTO_PAUSE_END
+
+def _is_paused() -> bool:
+    if _pause_manual is not None:
+        return _pause_manual
+    return _auto_paused()
+
+def _pause_reason() -> str:
+    if _pause_manual is True:
+        return "manual"
+    if _pause_manual is None and _auto_paused():
+        return "auto"
+    return ""
+
 ALLOWED_SOURCES = {"yfinance", "twelvedata"}
 
 # ── Twelve Data credit tracking ───────────────────────────────
@@ -249,6 +274,26 @@ def _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=None):
 
 
 
+@app.route("/api/pause", methods=["POST"])
+def api_pause():
+    """Toggle or set scan pause state. Body: {"action": "pause"|"resume"|"toggle"|"auto"}"""
+    global _pause_manual
+    action = (request.get_json(silent=True) or {}).get("action", "toggle")
+    if action == "auto":
+        _pause_manual = None          # revert to auto logic
+    elif action == "pause":
+        _pause_manual = True
+    elif action == "resume":
+        _pause_manual = False
+    else:  # toggle
+        _pause_manual = not _is_paused()
+    return jsonify({
+        "paused":  _is_paused(),
+        "reason":  _pause_reason(),
+        "resume_at": f"{AUTO_PAUSE_END:02d}:00",
+    })
+
+
 @app.route("/api/alert", methods=["POST"])
 def api_alert():
     """Manually send Telegram alert for the last scan (bypasses dedup and is_hist guard)."""
@@ -350,6 +395,14 @@ def api_alert():
 
 @app.route("/api/scan")
 def api_scan():
+    # Honour pause state only in live mode (date= param means historical)
+    if not request.args.get("date") and _is_paused():
+        return jsonify({
+            "paused":    True,
+            "reason":    _pause_reason(),
+            "resume_at": f"{AUTO_PAUSE_END:02d}:00 IL",
+        })
+
     date_str    = request.args.get("date", "")
     hour        = int(request.args.get("hour", 15))
     minute      = int(request.args.get("minute", 0))

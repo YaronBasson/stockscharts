@@ -233,8 +233,17 @@
     </div>
     <button class="btn btn-sm btn-primary" id="lock-btn" title="Lock charts together">&#128274; Locked</button>
     <button class="btn btn-sm btn-outline-secondary" id="refresh-btn" title="Refresh now">&#8635;</button>
+    <button class="btn btn-sm btn-outline-secondary" id="pause-btn" title="Pause / resume live scanning">⏸ Pause</button>
     <button class="btn btn-sm btn-outline-warning" id="alert-btn" title="Send Telegram alert for current signals" disabled>&#128241; Alert</button>
   </div>
+</div>
+
+<!-- paused banner -->
+<div id="paused-banner" style="display:none; background:#1c2128; border-bottom:1px solid #30363d;
+     padding:6px 16px; font-size:.8rem; color:#8b949e; text-align:center;">
+  ⏸ <span id="paused-msg">Scanning paused</span>
+  &nbsp;—&nbsp;
+  <a href="#" id="paused-resume-link" style="color:#58a6ff">Resume now</a>
 </div>
 
 <!-- main content -->
@@ -953,6 +962,32 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
     });
 
     chartEl.addEventListener('mouseleave', hideAll);
+
+    // ── Y-axis scroll zoom for areas Plotly doesn't handle ──────
+    // Plotly handles scroll on the Y-axis label strip (calls preventDefault).
+    // For every other area (plot body, right/left margins) we apply our own
+    // Y-axis zoom so the behaviour is consistent everywhere.
+    chartEl.addEventListener('wheel', (e) => {
+      // Let Plotly's own handler fire first (same bubble phase, registered earlier).
+      // If it called preventDefault the Y-axis area is already handled — skip.
+      if (e.defaultPrevented) return;
+
+      const layout = chartEl._fullLayout;
+      if (!layout) return;
+      const yRange = layout.yaxis._range || layout.yaxis.range;
+      if (!yRange || yRange.length < 2) return;
+
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 1.12 : 1 / 1.12;   // scroll down = zoom out
+      const y0  = yRange[0], y1 = yRange[1];
+      const mid = (y0 + y1) / 2;
+      const half = (y1 - y0) / 2 * factor;
+      Plotly.relayout(divId, {
+        'yaxis.range':     [mid - half, mid + half],
+        'yaxis.autorange': false,
+      });
+    }, { passive: false });
+
     hoverListeners[divId] = true;
   }
 }
@@ -1254,7 +1289,9 @@ async function loadData() {
   try {
     const res = await fetch('/api/scan?' + params.toString());
     const data = await res.json();
+    if (data.paused) { handlePaused(data); return; }
     if (!res.ok) { setStatus(data.error || 'Error', true); return; }
+    setPausedUI(false);
     render(data);
     // Staleness: how old is the last candle?
     if (data.last_candle) {
@@ -1311,6 +1348,53 @@ async function render(data) {
   renderRecommendation(data.recommendation, data.quarter, data.mnq.levels, data.mnq.current);
   updateAlertBtn(data);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Pause / resume
+════════════════════════════════════════════════════════════════ */
+function setPausedUI(paused, reason, resumeAt) {
+  const banner = document.getElementById('paused-banner');
+  const btn    = document.getElementById('pause-btn');
+  if (paused) {
+    const autoMsg = reason === 'auto'
+      ? `Market closed — auto-resuming at ${resumeAt || '14:00'} IL`
+      : 'Scanning paused manually';
+    document.getElementById('paused-msg').textContent = autoMsg;
+    banner.style.display = 'block';
+    btn.textContent = '▶ Resume';
+    btn.classList.replace('btn-outline-secondary', 'btn-outline-success');
+    document.getElementById('sb-next').textContent = reason === 'auto'
+      ? `Paused until ${resumeAt || '14:00'} IL` : 'Paused';
+  } else {
+    banner.style.display = 'none';
+    btn.textContent = '⏸ Pause';
+    btn.classList.replace('btn-outline-success', 'btn-outline-secondary');
+  }
+}
+
+function handlePaused(data) {
+  setPausedUI(true, data.reason, data.resume_at);
+  setStatus('Paused — market closed', false);
+  document.getElementById('overlay').classList.remove('show');
+}
+
+async function togglePause() {
+  const res  = await fetch('/api/pause', { method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({action: 'toggle'}) });
+  const data = await res.json();
+  setPausedUI(data.paused, data.reason, data.resume_at);
+  if (!data.paused) {
+    // Immediately load fresh data on resume
+    loadData();
+  }
+}
+
+document.getElementById('pause-btn').addEventListener('click', togglePause);
+document.getElementById('paused-resume-link').addEventListener('click', (e) => {
+  e.preventDefault();
+  togglePause();
+});
 
 /* ═══════════════════════════════════════════════════════════════
    Live mode auto-refresh
