@@ -1671,7 +1671,12 @@ document.querySelectorAll('.btn-hour').forEach(btn => {
     selectedMinute = 0;
     syncHourButtons();
     updateStepDisplay();
+    loadData();
   });
+});
+
+document.getElementById('date-input').addEventListener('change', () => {
+  loadData();
 });
 
 document.getElementById('step-prev').addEventListener('click', () => stepTime(-1));
