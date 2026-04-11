@@ -811,30 +811,44 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
   const quarterAnnotations = buildQuarterAnnotations(candles);
   const quarterTicks       = buildQuarterTicks(candles);
 
-  // ── Hidden SMT reference line — most recent signal only ──────
+  // ── Hidden SMT diagonal body line — most recent signal only ────
+  // Draws a diagonal orange line from the reference body level (ref candle)
+  // to the current candle's body level, showing the divergence visually.
+  // MNQ line goes down (swept), MES line stays flat or goes up (held).
   const hiddenRefShapes      = [];
   const hiddenRefAnnotations = [];
 
-  // Only draw for the single most-recent hidden SMT
   const sortedHidden = [...hiddenSmts].sort((a, b) => b.time > a.time ? 1 : -1);
   const latestHidden = sortedHidden.length ? sortedHidden[0] : null;
-  if (latestHidden && lastCandleT) {
-    const isLong   = (latestHidden.direction || '').includes('LONG');
-    const refLevel = ticker === 'MNQ' ? latestHidden.ref_mnq : latestHidden.ref_mes;
+  if (latestHidden) {
+    const refLevel = ticker === 'MNQ' ? latestHidden.ref_mnq     : latestHidden.ref_mes;
     const refTime  = ticker === 'MNQ' ? latestHidden.ref_mnq_time : latestHidden.ref_mes_time;
+    const curVal   = ticker === 'MNQ' ? latestHidden.mnq_val     : latestHidden.mes_val;
+    const curTime  = latestHidden.time;
 
-    if (refLevel != null && refTime != null) {
+    if (refLevel != null && refTime != null && curVal != null && curTime != null) {
+      // diagonal line: refTime/refLevel → curTime/curVal
       hiddenRefShapes.push({
         type:'line', xref:'x', yref:'y',
-        x0: refTime, x1: lastCandleT,
-        y0: refLevel, y1: refLevel,
-        line:{ color:'#f0883e', width:1.5, dash:'dash' },
+        x0: refTime, x1: curTime,
+        y0: refLevel, y1: curVal,
+        line:{ color:'#f0883e', width:2, dash:'dash' },
       });
+      // small dot at reference candle end
       hiddenRefAnnotations.push({
-        xref:'paper', yref:'y',
-        x: 0.99, y: refLevel,
-        xanchor:'right', yanchor: isLong ? 'top' : 'bottom',
-        text: `Ref ${refLevel.toFixed(2)}`,
+        xref:'x', yref:'y',
+        x: refTime, y: refLevel,
+        xanchor:'center', yanchor:'middle',
+        text: '●',
+        showarrow: false,
+        font:{ color:'#f0883e', size:8, family:'monospace' },
+      });
+      // label + dot at current candle end
+      hiddenRefAnnotations.push({
+        xref:'x', yref:'y',
+        x: curTime, y: curVal,
+        xanchor:'left', yanchor:'middle',
+        text: ` ● ${curVal.toFixed(2)}`,
         showarrow: false,
         font:{ color:'#f0883e', size:9, family:'monospace' },
       });
