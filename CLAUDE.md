@@ -48,7 +48,7 @@ POLYGON_API_KEY=...
 - FVG rectangles drawn from gap formation candle (c3) to last candle — disappear when filled
 - SMT alert box: Regular, Hidden, Fill types with ref label (e.g. "swing high @15:30")
 - Fill SMT: highlights triggering FVG with bright border + shows gap range in alert box
-- Recommendation panel with entry/target/stop levels
+- Recommendation panel with trade plan table: Entry, TP1–TP4 (named levels + FVG edges), Stop (named level), Stop (configurable % from `.env`)
 - Quarters table (Q1–Q4 H/L for today)
 - Levels table (PDH/PDL, TDO, TWO, HOD/LOD, Q1–Q4 H/L, NYO)
 - Manual Telegram alert button (bypasses dedup, works in historical mode)
@@ -83,6 +83,7 @@ Gap: **00:00–01:00** — no quarters defined.
 | `SWING_STRENGTH` | `2` | Candles each side for swing high/low detection |
 | `DATA_SOURCE` | `"yfinance"` | `"yfinance"` or `"twelvedata"` |
 | `TWELVEDATA_API_KEY` | `""` | Read from `.env` |
+| `STOP_LOSS_PCT` | `10` | Stop loss percentage for trade plan (set in `.env`) |
 
 ## Architecture
 
@@ -107,12 +108,13 @@ Two main files + one template:
 
 ### `web_app.py`
 - Flask app on `127.0.0.1:8080`, `debug=False`
-- `GET /api/scan` — full analysis; returns candles, levels, signals, recommendation
+- `GET /api/scan` — full analysis; returns candles, levels, signals, recommendation, `stop_loss_pct`
   - Pause guard: returns `{paused, reason, resume_at}` during 23:00–14:00 IL in live mode
 - `POST /api/pause` — toggle/set pause state; body `{action: "pause"|"resume"|"toggle"|"auto"}`
 - `POST /api/alert` — manual Telegram send from `_last_scan_ctx`
 - Auto-pause constants: `AUTO_PAUSE_START=23`, `AUTO_PAUSE_END=14`
 - Twelve Data credit tracking: `TD_CREDITS_PER_SCAN=9`, `TD_DAILY_LIMIT=800`
+- `_build_trade_plan_str(action, mnq_levels, mnq_fvgs, mes_fvgs)` — builds TP1–TP4 candidate pool from named levels + FVG edges, picks stop (nearest named level on opposite side), returns Telegram HTML string including `🛑 Stop (level)` and `⛔ Stop (X%)`
 
 ### `templates/index.html`
 - Bootstrap 5 + Plotly.js

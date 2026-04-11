@@ -54,6 +54,7 @@ SWING_LOOKBACK_DAYS   = int(os.getenv("SWING_LOOKBACK_DAYS", "7"))
 SMT_LOOKBACK_CANDLES  = int(os.getenv("SMT_LOOKBACK_CANDLES", "10"))
 SMT_TOLERANCE_PCT     = float(os.getenv("SMT_TOLERANCE_PCT", "0.0015"))
 SWING_STRENGTH        = int(os.getenv("SWING_STRENGTH", "2"))
+STOP_LOSS_PCT         = float(os.getenv("STOP_LOSS_PCT", "10"))   # % of entry price
 
 # ── Data source ───────────────────────────────────────────────
 # "yfinance"    — free, no key, works on normal trading days

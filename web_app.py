@@ -48,7 +48,7 @@ from ict_smt_agent import (
     get_quarter, quarter_range_str, quarter_end_dt, auto_timeframe,
     nearest_liquidity, send_telegram,
     ISRAEL_TZ, QUARTERS, TIMEFRAME, LOOKBACK_DAYS, SWING_LOOKBACK_DAYS, TIMEFRAME_MAX_DAYS,
-    DATA_SOURCE, TWELVEDATA_API_KEY, WEIGHTS,
+    DATA_SOURCE, TWELVEDATA_API_KEY, WEIGHTS, STOP_LOSS_PCT,
 )
 
 # ── Web SMT deduplication (keyed by signal type + candle time) ─
@@ -222,7 +222,66 @@ def index():
     return render_template("index.html")
 
 
-def _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=None):
+def _build_trade_plan_str(action: str, mnq_levels: dict, mnq_fvgs: list, mes_fvgs: list) -> str:
+    """Build a Telegram-formatted trade plan (entry / TP1-4 / stop) for LONG or SHORT."""
+    import html as html_lib
+    if action not in ("LONG", "SHORT"):
+        return ""
+
+    current = mnq_levels.get("CURRENT", 0)
+    if not current:
+        return ""
+
+    is_long = action == "LONG"
+
+    # Candidate levels: named price levels + FVG edges
+    candidates = [(k, float(v), "level") for k, v in mnq_levels.items() if k != "CURRENT"]
+    for f in mnq_fvgs:
+        dir_tag = "▲ GAP" if f["type"] == "bullish" else "▼ GAP"
+        candidates.append((f"{dir_tag} MNQ top", float(f["top"]),    "fvg"))
+        candidates.append((f"{dir_tag} MNQ btm", float(f["bottom"]), "fvg"))
+    for f in mes_fvgs:
+        dir_tag = "▲ GAP" if f["type"] == "bullish" else "▼ GAP"
+        candidates.append((f"{dir_tag} MES top", float(f["top"]),    "fvg"))
+        candidates.append((f"{dir_tag} MES btm", float(f["bottom"]), "fvg"))
+
+    # Stop: nearest named level on the opposite side
+    stop_pool = [(k, v, t) for k, v, t in candidates if (is_long and v < current) or (not is_long and v > current)]
+    stop_pool.sort(key=lambda x: x[1], reverse=is_long)
+    stop = next((x for x in stop_pool if x[2] == "level"), stop_pool[0] if stop_pool else None)
+    stop_dist = abs(stop[1] - current) if stop else None
+
+    # Targets: up to 4, nearest first, in trade direction
+    tp_pool = [(k, v, t) for k, v, t in candidates if (is_long and v > current) or (not is_long and v < current)]
+    tp_pool.sort(key=lambda x: x[1], reverse=not is_long)
+    tps = tp_pool[:4]
+
+    arrow = "▲" if is_long else "▼"
+    entry_emoji = "🟢" if is_long else "🔴"
+    lines = [f"\n{entry_emoji} <b>Trade Plan (MNQ)</b>",
+             f"  Entry:  <b>{current:.2f}</b>  (current)"]
+
+    for i, (k, v, t) in enumerate(tps, 1):
+        dist = abs(v - current)
+        rr   = f"  R/R 1:{dist/stop_dist:.1f}" if stop_dist else ""
+        pts  = f"+{dist:.2f}" if is_long else f"-{dist:.2f}"
+        lines.append(f"  {arrow} TP{i}:  <b>{v:.2f}</b>  ({pts} pts)  {html_lib.escape(k)}{rr}")
+
+    if stop:
+        dist = abs(stop[1] - current)
+        pts  = f"-{dist:.2f}" if is_long else f"+{dist:.2f}"
+        lines.append(f"  🛑 Stop (level): <b>{stop[1]:.2f}</b>  ({pts} pts)  {html_lib.escape(stop[0])}")
+
+    # Percentage-based stop loss
+    pct_stop_price = current * (1 - STOP_LOSS_PCT / 100) if is_long else current * (1 + STOP_LOSS_PCT / 100)
+    pct_dist       = abs(pct_stop_price - current)
+    pct_pts        = f"-{pct_dist:.2f}" if is_long else f"+{pct_dist:.2f}"
+    lines.append(f"  ⛔ Stop ({STOP_LOSS_PCT:.4g}%): <b>{pct_stop_price:.2f}</b>  ({pct_pts} pts)")
+
+    return "\n".join(lines)
+
+
+def _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=None, mnq_fvgs=None, mes_fvgs=None):
     """Send Telegram for any SMT signals not already alerted this candle."""
     global _last_web_smt
     import html as html_lib
@@ -235,44 +294,39 @@ def _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=None):
 
         is_long = sig["direction"].startswith("LONG")
         emoji   = "🟢" if is_long else "🔴"
-        cur_mnq = mnq_levels.get("CURRENT", 0)
-        cur_mes = mes_levels.get("CURRENT", 0)
-        tgt_mnq_above, tgt_mnq_below = nearest_liquidity(cur_mnq, mnq_levels)
-        tgt_mes_above, tgt_mes_below = nearest_liquidity(cur_mes, mes_levels)
-        tgt_mnq = tgt_mnq_above if is_long else tgt_mnq_below
-        tgt_mes = tgt_mes_above if is_long else tgt_mes_below
-        tg_tgt  = f"\n🎯 <b>Target MNQ:</b> {tgt_mnq[0]} @ {tgt_mnq[1]}" if tgt_mnq else ""
-        tg_tgt += f"\n🎯 <b>Target MES:</b> {tgt_mes[0]} @ {tgt_mes[1]}" if tgt_mes else ""
 
         q_info = get_quarter(ref_time)
         q_tag  = ""
         if q_info:
-            q_num, s, e = q_info
-            q_end = quarter_end_dt(ref_time, e)
+            q_num, qs, qe = q_info
+            q_end = quarter_end_dt(ref_time, qe)
             q_tag = f"  |  Q{q_num} till {q_end.strftime('%H:%M')}"
 
-        # Recommendation summary (if available)
         rec_str = ""
         if rec:
-            action   = rec.get("action", "WAIT")
-            strength = rec.get("strength", "")
-            score    = rec.get("score", 0)
-            reasons  = rec.get("reasons", [])
-            rec_emoji = "🟢" if action == "LONG" else ("🔴" if action == "SHORT" else "⏸")
-            strength_str = f" ({strength})" if strength else ""
-            rec_str = f"\n{rec_emoji} <b>Recommendation: {action}{strength_str}</b>  score: {score:+.3f}"
+            r_action   = rec.get("action", "WAIT")
+            strength   = rec.get("strength", "")
+            score      = rec.get("score", 0)
+            reasons    = rec.get("reasons", [])
+            rec_emoji  = "🟢" if r_action == "LONG" else ("🔴" if r_action == "SHORT" else "⏸")
+            rec_str    = f"\n{rec_emoji} <b>Recommendation: {r_action} ({strength})</b>  score: {score:+.3f}"
             if reasons:
                 rec_str += "\n📋 " + "\n📋 ".join(html_lib.escape(r) for r in reasons)
+
+        plan_str = _build_trade_plan_str(
+            (rec or {}).get("action", "WAIT"),
+            mnq_levels, mnq_fvgs or [], mes_fvgs or []
+        )
 
         tg_text = (
             f"{emoji} <b>SMT Signal — {sig['direction']} [WEB]</b>\n"
             f"⏰ {sig['time'].strftime('%d/%m/%Y %H:%M')} (Israel)\n"
             f"📊 MNQ: <b>{sig['mnq_val']:.2f}</b>  (ref: {sig['ref_mnq']:.2f})\n"
             f"📊 MES: <b>{sig['mes_val']:.2f}</b>  (ref: {sig['ref_mes']:.2f})\n"
-            f"💡 {html_lib.escape(sig['detail'])}"
-            f"{tg_tgt}\n"
+            f"💡 {html_lib.escape(sig['detail'])}\n"
             f"⚙️ Timeframe: {TIMEFRAME}{q_tag}"
             f"{rec_str}"
+            f"{plan_str}"
         )
         send_telegram(tg_text)
 
@@ -313,6 +367,8 @@ def api_alert():
     fill_smts   = ctx["fill_smts"]
     mnq_levels  = ctx["mnq_levels"]
     mes_levels  = ctx["mes_levels"]
+    mnq_fvgs    = ctx.get("mnq_fvgs", [])
+    mes_fvgs    = ctx.get("mes_fvgs", [])
     ref_time    = ctx["ref_time"]
     rec         = ctx["rec"]
 
@@ -333,12 +389,8 @@ def api_alert():
         if reasons:
             rec_str += "\n📋 " + "\n📋 ".join(html_lib.escape(r) for r in reasons)
 
-    # ── Targets ───────────────────────────────────────────────
-    cur_mnq = mnq_levels.get("CURRENT", 0)
-    tgt_above, tgt_below = nearest_liquidity(cur_mnq, mnq_levels)
-    is_long = action == "LONG"
-    tgt = tgt_above if is_long else tgt_below
-    tgt_str = f"\n🎯 <b>Target MNQ:</b> {tgt[0]} @ {tgt[1]}" if tgt else ""
+    # ── Trade plan ────────────────────────────────────────────
+    plan_str = _build_trade_plan_str(action, mnq_levels, mnq_fvgs, mes_fvgs)
 
     q_info = get_quarter(ref_time)
     q_tag  = ""
@@ -368,10 +420,10 @@ def api_alert():
                 f"{emoji} <b>{kind} — {direction} [MANUAL]</b>\n"
                 f"⏰ {ref_time.strftime('%d/%m/%Y %H:%M')} (Israel)\n"
                 f"{vals_str}\n"
-                f"💡 {html_lib.escape(sig.get('detail',''))}"
-                f"{tgt_str}\n"
+                f"💡 {html_lib.escape(sig.get('detail',''))}\n"
                 f"⚙️ Timeframe: {TIMEFRAME}{q_tag}"
                 f"{rec_str}"
+                f"{plan_str}"
             )
             ok, reason = send_telegram(tg_text)
             if ok:
@@ -385,7 +437,7 @@ def api_alert():
             f"⏰ {ref_time.strftime('%d/%m/%Y %H:%M')} (Israel)\n"
             f"⚙️ Timeframe: {TIMEFRAME}{q_tag}"
             f"{rec_str}"
-            f"{tgt_str}"
+            f"{plan_str}"
         )
         ok, reason = send_telegram(tg_text)
         if ok:
@@ -490,13 +542,15 @@ def api_scan():
         "fill_smts":   fill_smts,
         "mnq_levels":  mnq_levels,
         "mes_levels":  mes_levels,
+        "mnq_fvgs":    mnq_fvgs,
+        "mes_fvgs":    mes_fvgs,
         "ref_time":    ref_time,
         "rec":         recommendation,
     }
 
     # ── Telegram: SMT alerts only, with recommendation context ──
     if not is_hist and smt_sigs:
-        _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=recommendation)
+        _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=recommendation, mnq_fvgs=mnq_fvgs, mes_fvgs=mes_fvgs)
 
     # ── Current quarter ───────────────────────
     q_info  = get_quarter(ref_time)
@@ -565,6 +619,7 @@ def api_scan():
         "ref_time":     ref_time.isoformat(),
         "last_candle":  last_candle,
         "timeframe":    display_tf,
+        "stop_loss_pct": STOP_LOSS_PCT,
         "source":       ui_source,
         "twelvedata":   td_info,
         "is_historical": is_hist,

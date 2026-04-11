@@ -83,7 +83,7 @@
   .data-row { flex:1; min-height:0; overflow:hidden; }
   .data-row > [class*="col-"] { height:100%; }
   .data-row .tbl-card { height:100%; overflow:hidden; display:flex; flex-direction:column; }
-  .data-row .tbl-card.mb-3 { height:auto; flex:none; max-height:48%; }
+  .data-row .tbl-card.mb-3 { height:auto; flex:none; max-height:62%; }
   .data-row .table-responsive { overflow-y:auto; flex:1; min-height:0; }
 
   /* ── compact tables ── */
@@ -307,14 +307,13 @@
     <!-- SMT + FVG signals -->
     <div class="col-md-4">
 
-      <!-- SMT alert box (shown only when signal exists) -->
-      <div id="smt-alert-box" style="display:none; margin-bottom:6px; border-radius:6px; padding:8px 12px; border-width:2px; border-style:solid;">
-        <div style="font-size:.78rem; font-weight:700; margin-bottom:4px" id="smt-alert-title"></div>
-        <div style="font-size:.72rem; line-height:1.5" id="smt-alert-body"></div>
-      </div>
-
       <div class="tbl-card mb-3">
         <div class="card-header">SMT Signals</div>
+        <!-- Alert box lives inside the card so it doesn't push the table out of view -->
+        <div id="smt-alert-box" style="display:none; margin:6px 6px 0; border-radius:6px; padding:8px 12px; border-width:2px; border-style:solid;">
+          <div style="font-size:.78rem; font-weight:700; margin-bottom:4px" id="smt-alert-title"></div>
+          <div style="font-size:.72rem; line-height:1.5" id="smt-alert-body"></div>
+        </div>
         <div class="table-responsive">
           <table class="table table-sm mb-0" id="tbl-smt">
             <thead><tr><th>Dir</th><th>Type</th><th>Time</th><th>Detail</th></tr></thead>
@@ -389,13 +388,25 @@
               <ul id="rec-reasons" class="list-unstyled mb-0" style="font-size:.72rem"></ul>
             </div>
 
-            <!-- Targets -->
-            <div class="col-md-3" id="rec-targets-col" style="display:none">
-              <div class="text-secondary mb-1" style="font-size:.72rem">Levels (MNQ)</div>
-              <div id="rec-targets" style="font-size:.72rem; font-family:monospace; line-height:1.7"></div>
-            </div>
-
           </div>
+
+          <!-- Trade Plan — full-width, shown only for LONG/SHORT -->
+          <div id="rec-trade-plan" style="display:none; border-top:1px solid #30363d; margin-top:10px; padding-top:10px">
+            <div class="text-secondary mb-2" style="font-size:.72rem">Trade Plan (MNQ)</div>
+            <table style="width:100%; font-size:.75rem; font-family:monospace; border-collapse:collapse" id="rec-trade-table">
+              <thead>
+                <tr style="color:#8b949e; font-size:.68rem">
+                  <th style="padding:2px 10px 4px 0; font-weight:400">Level</th>
+                  <th style="padding:2px 10px 4px 0; font-weight:400; text-align:right">Price</th>
+                  <th style="padding:2px 10px 4px 0; font-weight:400; text-align:right">Pts</th>
+                  <th style="padding:2px 10px 4px 0; font-weight:400; text-align:right">R/R</th>
+                  <th style="padding:2px 0    4px 0; font-weight:400">Source</th>
+                </tr>
+              </thead>
+              <tbody id="rec-trade-tbody"></tbody>
+            </table>
+          </div>
+
         </div>
       </div>
     </div>
@@ -426,6 +437,7 @@ let chartsLocked   = true;
 let isSyncing        = false;
 let mnqCurrent       = 0;
 let mesCurrent       = 0;
+let data_stop_loss_pct = 10;
 const hoverListeners = {};     // divId → bool, prevent stacking listeners
 const listenersAttached = {};
 const INTERVAL_BY_SOURCE = { yfinance:60_000, twelvedata:300_000 };
@@ -737,16 +749,25 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
   const lastCandleT = candles.length ? candles[candles.length - 1].t : null;
 
   // ── FVG rectangles — start at gap formation (c3), extend to last candle ──
-  const fvgShapes = lastCandleT ? fvgs.map(f => ({
-    type:'rect', xref:'x', yref:'y',
-    x0: f.start_time, x1: lastCandleT,
-    y0: f.bottom, y1: f.top,
-    fillcolor: f.type === 'bullish' ? '#3fb95022' : '#f8514922',
-    line:{width:0},
-    layer:'below',
-  })) : [];
+  // Each gap gets: semi-transparent fill + solid top & bottom edge lines so
+  // even a 1-point gap is clearly visible regardless of zoom level.
+  const fvgShapes = lastCandleT ? fvgs.flatMap(f => {
+    const color  = f.type === 'bullish' ? '#3fb950' : '#f85149';
+    const fill   = f.type === 'bullish' ? '#3fb95033' : '#f8514933';
+    return [
+      // filled rectangle
+      { type:'rect',  xref:'x', yref:'y', x0:f.start_time, x1:lastCandleT,
+        y0:f.bottom,  y1:f.top, fillcolor:fill, line:{width:0}, layer:'below' },
+      // top edge line
+      { type:'line',  xref:'x', yref:'y', x0:f.start_time, x1:lastCandleT,
+        y0:f.top,     y1:f.top,  line:{color, width:1, dash:'dot'} },
+      // bottom edge line
+      { type:'line',  xref:'x', yref:'y', x0:f.start_time, x1:lastCandleT,
+        y0:f.bottom,  y1:f.bottom, line:{color, width:1, dash:'dot'} },
+    ];
+  }) : [];
 
-  // ── Fill SMT: highlight the triggering FVG with a bright border ──
+  // ── Fill SMT: highlight the triggering FVG with a bright solid border ──
   const fillSmtFvgShapes = lastCandleT ? fillSmts
     .filter(s => s.fvg_instrument === ticker && s.fvg_bottom != null)
     .map(s => ({
@@ -754,9 +775,9 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
       x0: s.fvg_start_time || lastCandleT,
       x1: lastCandleT,
       y0: s.fvg_bottom, y1: s.fvg_top,
-      fillcolor: s.fvg_type === 'bullish' ? '#3fb95044' : '#f8514944',
-      line:{ color: s.fvg_type === 'bullish' ? '#3fb950' : '#f85149', width:1.5, dash:'dot' },
-      layer:'below',
+      fillcolor: s.fvg_type === 'bullish' ? '#3fb95066' : '#f8514966',
+      line:{ color: s.fvg_type === 'bullish' ? '#3fb950' : '#f85149', width:2 },
+      layer:'above',
     })) : [];
 
   // ── SMT annotation markers ──
@@ -1210,7 +1231,7 @@ function renderFvgs(mnqFvgs, mesFvgs) {
 /* ═══════════════════════════════════════════════════════════════
    Recommendation panel
 ════════════════════════════════════════════════════════════════ */
-function renderRecommendation(rec, quarter, levels, current) {
+function renderRecommendation(rec, quarter, levels, current, mnqFvgs = [], mesFvgs = []) {
   const row = document.getElementById('rec-row');
   if (!rec) { row.style.setProperty('display','none','important'); return; }
   row.style.removeProperty('display');
@@ -1287,42 +1308,122 @@ function renderRecommendation(rec, quarter, levels, current) {
     ul.innerHTML = '<li class="rec-reason text-secondary">No analysis available</li>';
   }
 
-  // ── Targets ──────────────────────────────────────────────────
-  const tgtCol = document.getElementById('rec-targets-col');
-  const tgtDiv = document.getElementById('rec-targets');
+  // ── Trade Plan table ─────────────────────────────────────────
+  const planDiv  = document.getElementById('rec-trade-plan');
+  const tbody    = document.getElementById('rec-trade-tbody');
   if (action !== 'WAIT' && levels && current) {
     const isLong = action === 'LONG';
-    // Sort levels by value; filter to relevant side
-    const entries = Object.entries(levels)
-      .map(([k, v]) => ({ k, v: Number(v) }))
-      .filter(e => isLong ? e.v > current : e.v < current)
-      .sort((a, b) => isLong ? a.v - b.v : b.v - a.v);  // nearest first
+    const entryColor = isLong ? '#3fb950' : '#f85149';
+    const tpArrow    = isLong ? '▲' : '▼';
 
-    const entryColor  = isLong ? '#3fb950' : '#f85149';
-    const arrowStr    = isLong ? '▲' : '▼';
-    let html = `<div style="color:#8b949e">Entry: <span style="color:${entryColor};font-weight:700">${current.toFixed(2)}</span></div>`;
+    // Build candidate pool: standard levels + FVG edges
+    const candidates = Object.entries(levels)
+      .map(([k, v]) => ({ label: k, v: Number(v), tag: 'level' }));
 
-    const targets = entries.slice(0, 3);
-    targets.forEach((e, i) => {
-      const diff  = Math.abs(e.v - current).toFixed(2);
-      const color = i === 0 ? entryColor : '#8b949e';
-      html += `<div style="color:${color}">${arrowStr} T${i+1}: <span style="font-weight:${i===0?'700':'400'}">${e.k} ${e.v.toFixed(2)}</span> <span style="color:#8b949e;font-size:.68rem">(${isLong?'+':'-'}${diff})</span></div>`;
-    });
-
-    // Stop: nearest level on the opposite side
-    const stopEntries = Object.entries(levels)
-      .map(([k, v]) => ({ k, v: Number(v) }))
-      .filter(e => isLong ? e.v < current : e.v > current)
-      .sort((a, b) => isLong ? b.v - a.v : a.v - b.v);
-    if (stopEntries.length) {
-      const st = stopEntries[0];
-      html += `<div style="color:#8b949e;margin-top:4px">Stop: <span style="color:#ffa657">${st.k} ${st.v.toFixed(2)}</span></div>`;
+    const allFvgs = [
+      ...mnqFvgs.map(f => ({...f, inst:'MNQ'})),
+      ...mesFvgs.map(f => ({...f, inst:'MES'})),
+    ];
+    for (const f of allFvgs) {
+      const dir = f.type === 'bullish' ? '▲' : '▼';
+      candidates.push({ label: `GAP ${dir} ${f.inst} top`,  v: f.top,    tag: 'fvg' });
+      candidates.push({ label: `GAP ${dir} ${f.inst} btm`,  v: f.bottom, tag: 'fvg' });
     }
 
-    tgtDiv.innerHTML = html;
-    tgtCol.style.display = 'block';
+    // Stop: nearest named level on opposite side
+    const stopCandidates = candidates
+      .filter(e => isLong ? e.v < current : e.v > current)
+      .sort((a, b) => isLong ? b.v - a.v : a.v - b.v);
+    const stop = stopCandidates.find(e => e.tag === 'level') || stopCandidates[0];
+    const stopDist = stop ? Math.abs(stop.v - current) : null;
+
+    // Percentage stop loss (from server config)
+    const stopLossPct  = data_stop_loss_pct ?? 10;
+    const pctStopPrice = isLong ? current * (1 - stopLossPct / 100)
+                                : current * (1 + stopLossPct / 100);
+    const pctStopDist  = Math.abs(pctStopPrice - current);
+
+    // Targets: levels in trade direction, nearest first, up to 4
+    const tps = candidates
+      .filter(e => isLong ? e.v > current : e.v < current)
+      .sort((a, b) => isLong ? a.v - b.v : b.v - a.v)
+      .slice(0, 4);
+
+    // Build rows
+    const rows = [];
+
+    // Entry row
+    rows.push({
+      icon:  isLong ? '🟢' : '🔴',
+      role:  'Entry',
+      price: current,
+      pts:   null,
+      rr:    null,
+      src:   '(current price)',
+      color: entryColor,
+      bold:  true,
+    });
+
+    // TP rows
+    tps.forEach((e, i) => {
+      const dist = Math.abs(e.v - current);
+      const rr   = stopDist ? (dist / stopDist).toFixed(1) : null;
+      rows.push({
+        icon:  tpArrow,
+        role:  `TP${i + 1}`,
+        price: e.v,
+        pts:   (isLong ? '+' : '-') + dist.toFixed(2),
+        rr:    rr ? `1 : ${rr}` : '—',
+        src:   e.label,
+        color: i === 0 ? entryColor : (e.tag === 'fvg' ? '#58a6ff' : '#c9d1d9'),
+        bold:  i === 0,
+      });
+    });
+
+    // Stop row
+    if (stop) {
+      const dist = Math.abs(stop.v - current);
+      rows.push({
+        icon:  '🛑',
+        role:  'Stop (level)',
+        price: stop.v,
+        pts:   (isLong ? '-' : '+') + dist.toFixed(2),
+        rr:    null,
+        src:   stop.label,
+        color: '#ffa657',
+        bold:  false,
+      });
+    }
+
+    // Percentage-based stop loss
+    rows.push({
+      icon:  '⛔',
+      role:  `Stop (${stopLossPct}%)`,
+      price: pctStopPrice,
+      pts:   (isLong ? '-' : '+') + pctStopDist.toFixed(2),
+      rr:    null,
+      src:   `${stopLossPct}% of entry`,
+      color: '#f85149',
+      bold:  true,
+    });
+
+    tbody.innerHTML = rows.map(r => `
+      <tr style="border-top:1px solid #21262d">
+        <td style="padding:3px 10px 3px 0; color:${r.color}; font-weight:${r.bold?'700':'400'}">
+          ${r.icon} ${r.role}</td>
+        <td style="padding:3px 10px 3px 0; text-align:right; color:${r.color}; font-weight:${r.bold?'700':'400'}">
+          ${r.price.toFixed(2)}</td>
+        <td style="padding:3px 10px 3px 0; text-align:right; color:#8b949e">
+          ${r.pts ?? '—'}</td>
+        <td style="padding:3px 10px 3px 0; text-align:right; color:#8b949e">
+          ${r.rr ?? '—'}</td>
+        <td style="padding:3px 0 3px 0; color:${r.tag==='fvg'?'#58a6ff':'#8b949e'}; font-size:.7rem">
+          ${r.src}</td>
+      </tr>`).join('');
+
+    planDiv.style.display = 'block';
   } else {
-    tgtCol.style.display = 'none';
+    planDiv.style.display = 'none';
   }
 }
 
@@ -1384,6 +1485,7 @@ async function render(data) {
   // store current prices for sync calculations
   mnqCurrent = data.mnq.current;
   mesCurrent = data.mes.current;
+  if (data.stop_loss_pct != null) data_stop_loss_pct = data.stop_loss_pct;
 
   // top bar
   document.getElementById('tf-badge').textContent = data.timeframe;
@@ -1404,7 +1506,7 @@ async function render(data) {
   renderLevels(data.mnq.levels, data.mes.levels, data.mnq.current, data.mes.current);
   renderSmt(data.smt_signals, data.hidden_smts || [], data.fill_smts || []);
   renderFvgs(data.mnq.fvgs, data.mes.fvgs);
-  renderRecommendation(data.recommendation, data.quarter, data.mnq.levels, data.mnq.current);
+  renderRecommendation(data.recommendation, data.quarter, data.mnq.levels, data.mnq.current, data.mnq.fvgs || [], data.mes.fvgs || []);
   updateAlertBtn(data);
 }
 
