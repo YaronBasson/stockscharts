@@ -125,6 +125,7 @@
   <h5>ICT SMT Dashboard</h5>
   <span class="badge badge-tf" id="tf-badge">15m</span>
   <span class="badge bg-danger" id="live-badge">● LIVE</span>
+  <span class="badge" id="paused-badge" style="display:none; background:#856404; color:#fff;">⏸ PAUSED</span>
   <span class="ms-auto text-secondary" id="ref-time" style="font-size:.75rem"></span>
   <button class="btn btn-sm btn-outline-secondary ms-2" data-bs-toggle="modal" data-bs-target="#glossaryModal" title="Acronym glossary" style="font-size:.72rem;padding:2px 8px;">?&nbsp;Glossary</button>
 </div>
@@ -1535,22 +1536,28 @@ async function render(data) {
    Pause / resume
 ════════════════════════════════════════════════════════════════ */
 function setPausedUI(paused, reason, resumeAt) {
-  const banner = document.getElementById('paused-banner');
-  const btn    = document.getElementById('pause-btn');
+  const banner      = document.getElementById('paused-banner');
+  const btn         = document.getElementById('pause-btn');
+  const pausedBadge = document.getElementById('paused-badge');
+  const isLive      = document.getElementById('mode-live').checked;
   if (paused) {
-    const autoMsg = reason === 'auto'
-      ? `Market closed — auto-resuming at ${resumeAt || '14:00'} IL`
-      : 'Scanning paused manually';
+    const autoMsg = reason === 'weekend'
+      ? `Weekend — market closed. Resumes ${resumeAt || 'Monday 14:00 IL'}`
+      : reason === 'auto'
+        ? `Market closed — auto-resuming at ${resumeAt || '14:00 IL'}`
+        : 'Scanning paused manually';
     document.getElementById('paused-msg').textContent = autoMsg;
     banner.style.display = 'block';
     btn.textContent = '▶ Resume';
     btn.classList.replace('btn-outline-secondary', 'btn-outline-success');
-    document.getElementById('sb-next').textContent = reason === 'auto'
-      ? `Paused until ${resumeAt || '14:00'} IL` : 'Paused';
+    document.getElementById('sb-next').textContent = reason === 'auto' || reason === 'weekend'
+      ? `Paused until ${resumeAt || '14:00 IL'}` : 'Paused';
+    if (isLive) pausedBadge.style.display = 'inline-block';
   } else {
     banner.style.display = 'none';
     btn.textContent = '⏸ Pause';
     btn.classList.replace('btn-outline-success', 'btn-outline-secondary');
+    pausedBadge.style.display = 'none';
   }
 }
 
@@ -1600,6 +1607,7 @@ function stopLive() {
   clearInterval(liveTimer);
   liveTimer = null;
   document.getElementById('live-badge').style.display = 'none';
+  document.getElementById('paused-badge').style.display = 'none';
   document.getElementById('sb-next').textContent = '';
 }
 

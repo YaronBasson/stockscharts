@@ -70,7 +70,10 @@ AUTO_PAUSE_END   = 14   # hour IL — resume at this hour
 _pause_manual: bool | None = None   # None = auto, True/False = manual override
 
 def _auto_paused() -> bool:
-    h = datetime.now(ISRAEL_TZ).hour
+    now = datetime.now(ISRAEL_TZ)
+    if now.weekday() >= 5:   # 5=Saturday, 6=Sunday — markets closed all day
+        return True
+    h = now.hour
     return h >= AUTO_PAUSE_START or h < AUTO_PAUSE_END
 
 def _is_paused() -> bool:
@@ -82,8 +85,19 @@ def _pause_reason() -> str:
     if _pause_manual is True:
         return "manual"
     if _pause_manual is None and _auto_paused():
+        now = datetime.now(ISRAEL_TZ)
+        if now.weekday() >= 5:
+            return "weekend"
         return "auto"
     return ""
+
+def _resume_at_str() -> str:
+    now = datetime.now(ISRAEL_TZ)
+    if now.weekday() == 5:   # Saturday → resumes Monday 14:00
+        return "Monday 14:00 IL"
+    if now.weekday() == 6:   # Sunday → resumes Monday 14:00
+        return "Monday 14:00 IL"
+    return f"{AUTO_PAUSE_END:02d}:00 IL"
 
 ALLOWED_SOURCES = {"yfinance", "twelvedata"}
 
@@ -350,7 +364,7 @@ def api_pause():
     return jsonify({
         "paused":  _is_paused(),
         "reason":  _pause_reason(),
-        "resume_at": f"{AUTO_PAUSE_END:02d}:00",
+        "resume_at": _resume_at_str(),
     })
 
 
