@@ -569,3 +569,198 @@ JS function: `renderRecommendation(rec, quarter)` — called from `render(data)`
 - Web app does not send Telegram alerts — run terminal agent in parallel for alerts
 - Recommendation weights (`WEIGHTS`) are currently equal (0.25 each); user to adjust after testing
 - Hidden SMT and Fill SMT signals are not yet shown in the web dashboard SMT table (only included in the recommendation score)
+
+---
+
+## SESSION 5 — Completed: 2026-04-11
+
+### Overview
+Major round of improvements spanning ICT accuracy, security hardening, UX polish, and trade planning:
+1. Dynamic nearest liquidity (swing high/low) for SMT reference instead of rolling window
+2. SMT signal ref labels with timestamps
+3. Security fixes: Polygon key to `.env`, removed debug endpoint, Flask debug off
+4. Auto-pause 23:00–14:00 IL with manual override
+5. Chart/UI overhaul: FVG visualization, chart sync redesign, scroll-zoom → auto-pan
+6. Trade plan table with TP levels and configurable % stop loss
+7. Telegram alerts now include full trade plan
+
+---
+
+### 1. Dynamic Nearest Liquidity for SMT Detection
+
+**Problem:** `detect_smt()` was comparing the current candle against the rolling min/max of the last N candles. This missed the ICT concept of "nearest liquidity to the left" — the most recent local swing high/low.
+
+**New function: `find_nearest_liquidity(df, swing_strength=SWING_STRENGTH)`**
+- Scans df (excluding current candle) from right to left
+- Returns `(swing_low_price, swing_low_time, swing_high_price, swing_high_time)` or `None`
+- Swing detection: `low[i] == min(low[i-n:i+n+1])` / `high[i] == max(high[i-n:i+n+1])` where n = `SWING_STRENGTH`
+- Minimum data: `2 * SWING_STRENGTH + 2` candles
+
+**`detect_smt()` modification:**
+- Calls `find_nearest_liquidity(mnq[:-1])` and `find_nearest_liquidity(mes[:-1])` for reference levels
+- Falls back to rolling window (`SMT_LOOKBACK_CANDLES`) if no swing found on either side
+
+**New config constants:**
+```python
+SWING_STRENGTH = 2          # candles each side for swing detection
+SWING_LOOKBACK_DAYS = 7     # data window for swing detection
+```
+
+---
+
+### 2. SMT Ref Labels with Timestamps
+
+All SMT signal dicts now include `ref_mnq_label` and `ref_mes_label` fields:
+- Swing reference: `"swing low @14:15"` / `"swing high @15:30"`
+- Rolling fallback: `"rolling low @14:45"` / `"rolling high @15:00"`
+
+Rolling fallback also tracks the timestamp of the min/max candle:
+```python
+mnq_rl_low_t  = win_mnq["low"].idxmin()
+mnq_rl_high_t = win_mnq["high"].idxmax()
+```
+
+Dashboard alert box shows: `swing low @14:15: 23941.50` instead of bare `ref: 23941.50`.
+
+Fill SMT signal dicts also extended with: `fvg_instrument`, `fvg_bottom`, `fvg_top`, `fvg_type`, `fvg_start_time`.
+
+---
+
+### 3. Security Fixes
+
+- **Polygon API key:** Was hardcoded in `py.py` (`KEY='...'`). Replaced with `os.getenv("POLYGON_API_KEY", "")`. Key added to `.env`. Old key rotated (was publicly committed on GitHub).
+- **`/api/debug-env` endpoint:** Removed entirely from `web_app.py`.
+- **Flask debug mode:** Changed `app.run(debug=True)` → `app.run(debug=False)`.
+
+---
+
+### 4. Auto-Pause 23:00–14:00 IL
+
+**`web_app.py`:**
+- Constants: `AUTO_PAUSE_START = 23`, `AUTO_PAUSE_END = 14`
+- `_auto_paused()` — returns True if current IL time is in the pause window (live mode only)
+- `_is_paused()` — `True` if manual pause active OR auto-paused
+- `_pause_reason()` — human-readable reason string
+- `_pause_manual` flag — for manual override
+- `GET /api/scan` guard: returns `{paused: true, reason, resume_at}` when paused
+- `POST /api/pause` endpoint: body `{action: "pause"|"resume"|"toggle"|"auto"}`
+
+**`templates/index.html`:**
+- `#paused-banner` div shown when paused; `⏸ Pause` / `▶ Resume` button
+- `setPausedUI()`, `handlePaused()`, `togglePause()` JS functions
+- `loadData()` checks for `data.paused` before rendering
+
+---
+
+### 5. Chart & UI Overhaul
+
+#### FVG Visualization (3 shapes per gap)
+- Each active FVG now draws 3 shapes: fill rect + top edge line + bottom edge line
+- Makes even 1-point gaps visible via the edge lines
+- Changed from `xref:'paper'` (full chart width) to `xref:'x'` with `x0=start_time` (c3 candle) to `x1=lastCandleT`
+- `detect_fvg()` now includes `start_time` (c3 timestamp) in each FVG dict
+
+**Fill SMT highlighted FVG:**
+- Triggering FVG drawn with brighter fill + dotted border on the relevant instrument's chart
+- Uses `layer:'above'` so it overlays other shapes
+
+#### SMT Alert Box Layout Fix
+- Alert box was above the `.tbl-card`, hiding table rows beneath
+- Moved `#smt-alert-box` inside the card div — alert and table now share one scrollable container
+- `max-height` increased from 48% to 62%
+
+#### Chart Sync Redesign
+Complete rewrite of chart sync logic to satisfy 5 requirements:
+1. Modebar zoom in/out/reset/pan buttons always mirror to the other chart
+2. When locked: all drag/scroll movements sync between charts
+3. When pan button pressed on one chart → also pressed on other
+4. When unlocked: modebar buttons still mirror, but chart movements don't sync
+5. Re-locking aligns MES to MNQ's current view
+
+Key implementation:
+- `mirrorToOther()` — always called for modebar button events (both locked and unlocked)
+- `syncLockedMovement()` — only called for drag/scroll events when locked
+- `chartsLocked` flag; lock button re-aligns MES on lock
+- Distinguishes modebar events (`'xaxis.range': [array]`) from drag/scroll events (`'xaxis.range[0]'` string keys)
+
+#### Scroll Zoom → Auto Pan Mode
+After any scroll zoom, both charts automatically switch to pan (move) mode:
+```javascript
+function switchToPanMode() {
+    setTimeout(() => {
+        isSyncing = false;
+        Plotly.relayout('mnq-chart', {dragmode: 'pan'});
+        Plotly.relayout('mes-chart', {dragmode: 'pan'});
+    }, 0);
+}
+```
+Called from 3 places: Y-axis wheel handler, first-zoom recenter, modebar relayout handler.
+
+**Y-axis scroll on right side of chart:**
+- Added `wheel` event listener on the chart div for events not captured by Plotly (right side / empty area)
+- `if (e.defaultPrevented) return` — skips if Plotly already handled it (left side price labels)
+
+---
+
+### 6. Trade Plan Table
+
+**`web_app.py` — `_build_trade_plan_str(action, mnq_levels, mnq_fvgs, mes_fvgs)`:**
+- Builds candidate pool from named MNQ levels + FVG edges (top/bottom)
+- Sorts by distance from current price
+- Picks TP1–TP4 (4 nearest in trade direction)
+- Picks stop = nearest named level on opposite side
+- Returns Telegram HTML string:
+  ```
+  📌 Entry: 23941.50
+  🎯 TP1: PDL (23982.00) — +40.50 pts
+  🎯 TP2: TDO (24050.00) — +108.50 pts
+  🛑 Stop (level): PWL (23890.00) — -51.50 pts
+  ⛔ Stop (10%): 21547.35 — -2394.15 pts
+  ```
+
+**`templates/index.html`:**
+- Replaced targets column with full-width `#rec-trade-plan` table in recommendation panel
+- Rows: Entry, TP1–TP4, Stop (level), Stop (%)
+- FVG edges shown in blue; named levels in default color
+- R/R calculated per TP: `abs(tp - entry) / abs(stop - entry)`
+
+---
+
+### 7. Configurable Stop Loss Percentage
+
+**`ict_smt_agent.py`:**
+```python
+STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "10"))
+```
+
+**`web_app.py`:**
+- Imported `STOP_LOSS_PCT` from `ict_smt_agent`
+- Included in `/api/scan` response as `"stop_loss_pct"`
+- `_build_trade_plan_str()` appends `⛔ Stop (X%)` row
+
+**`templates/index.html`:**
+- `data_stop_loss_pct = 10` global, set from `data.stop_loss_pct` in `render()`
+- Trade plan table: `⛔ Stop (X%)` row showing `pctStopPrice = isLong ? current*(1-pct/100) : current*(1+pct/100)`
+
+**`.env`:** Added `# STOP_LOSS_PCT=10` comment (uncomment to override).
+
+---
+
+### Files Status
+
+| File | Status |
+|---|---|
+| `ict_smt_agent.py` | `find_nearest_liquidity()` added; `detect_smt()` uses swing levels; `SWING_STRENGTH`, `SWING_LOOKBACK_DAYS`, `STOP_LOSS_PCT` added; FVG `start_time` field added |
+| `web_app.py` | Debug endpoint removed; `debug=False`; pause infrastructure; `_build_trade_plan_str()`; trade plan in Telegram alerts; `stop_loss_pct` in response |
+| `templates/index.html` | FVG 3-shape visualization; Fill SMT FVG highlight; chart sync redesign; scroll zoom → auto pan; trade plan table; configurable % stop loss |
+| `py.py` | Polygon key moved to `.env` via `os.getenv()` |
+| `.env` | Added `POLYGON_API_KEY`; added `# STOP_LOSS_PCT=10` comment |
+| `CLAUDE.md` | Fully rewritten to reflect current state |
+| `SESSION_NOTES.md` | This file |
+
+### Known Issues / Pending
+
+- `simulate.py` still exists — broken, should be deleted
+- yfinance free tier: 15-minute inherent delay on intraday data (cannot be bypassed)
+- Recommendation weights (`WEIGHTS`) are equal (0.25 each); user to adjust after live testing
+- Web app now sends Telegram alerts (via `/api/alert` and `_send_web_smt_alerts()`); terminal agent no longer required in parallel for alerts
