@@ -121,4 +121,5 @@ Two main files + one template:
 - Chart sync: `chartsLocked` flag; modebar buttons (zoom/pan/reset) always mirror; drag/scroll only syncs when locked; re-locking aligns MES to MNQ's view
 - `switchToPanMode()` — called after scroll zoom to auto-switch both charts to pan mode
 - FVG shapes: `xref:'x'`, `x0=start_time`, `x1=lastCandleT` — not full-width
+- Hidden SMT: diagonal orange line on both charts connecting reference body level → current body level (shows divergence: one line goes down, other stays flat/up)
 - Fill SMT highlighted FVG: brighter fill + dotted border on the triggering instrument's chart

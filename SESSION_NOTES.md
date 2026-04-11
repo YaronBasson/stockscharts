@@ -764,3 +764,41 @@ STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", "10"))
 - yfinance free tier: 15-minute inherent delay on intraday data (cannot be bypassed)
 - Recommendation weights (`WEIGHTS`) are equal (0.25 each); user to adjust after live testing
 - Web app now sends Telegram alerts (via `/api/alert` and `_send_web_smt_alerts()`); terminal agent no longer required in parallel for alerts
+
+---
+
+## SESSION 6 — Completed: 2026-04-11
+
+### Overview
+Small UX fixes and Hidden SMT visual improvement.
+
+### 1. Hidden SMT — Diagonal Line Between Bodies
+
+**Problem:** Hidden SMT reference was drawn as a horizontal dashed orange line at `refLevel` from `refTime` to `lastCandleT`. This didn't show the divergence visually.
+
+**Fix (`templates/index.html` — `buildChart()`):**
+Replaced horizontal line with a diagonal line connecting:
+- Start: `(ref_mnq_time / ref_mes_time, ref_mnq / ref_mes)` — the reference body level on the reference candle
+- End: `(latestHidden.time, mnq_val / mes_val)` — the current candle's body level
+
+Result: on MNQ the line goes **down** (body swept below reference), on MES the line stays **flat or goes up** (body held). The two diagonal lines side-by-side show the divergence clearly.
+
+Added small `●` dot annotations at both endpoints; label shows current body value at the right end.
+
+### 2. Date Mode — Charts Not Updating on Date/Hour Change
+
+**Problem:** Two event handlers were missing `loadData()` calls:
+1. Hour buttons (13:00–18:00) — updated `selectedHour` but never fetched data
+2. Date picker — no `change` listener at all; user had to click "Scan" manually
+
+**Fix (`templates/index.html`):**
+- Added `loadData()` at the end of the `.btn-hour` click handler
+- Added `document.getElementById('date-input').addEventListener('change', () => { loadData(); })`
+
+Note: step arrows (◄/►) and keyboard ←/→ already called `loadData()` via `stepTime()` — those were not broken.
+
+### Files Status
+
+| File | Status |
+|---|---|
+| `templates/index.html` | Hidden SMT diagonal line; date picker and hour buttons now auto-load |

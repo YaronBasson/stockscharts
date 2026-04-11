@@ -1450,6 +1450,8 @@ async function loadData() {
   if (!isLive) {
     const date = document.getElementById('date-input').value;
     if (!date) { setStatus('Select a date first', true); return; }
+    const today = new Date().toISOString().slice(0, 10);
+    if (date > today) { setStatus('Cannot load future dates', true); return; }
     params.set('date', date);
     params.set('hour', selectedHour);
     params.set('minute', selectedMinute);
@@ -1613,10 +1615,12 @@ document.getElementById('mode-live').addEventListener('change', () => {
 document.getElementById('mode-date').addEventListener('change', () => {
   document.getElementById('date-controls').classList.remove('d-none');
   stopLive();
-  // set today's date as default
-  if (!document.getElementById('date-input').value) {
-    document.getElementById('date-input').value = new Date().toISOString().slice(0,10);
-  }
+  const today = new Date().toISOString().slice(0, 10);
+  const di = document.getElementById('date-input');
+  di.max = today;
+  if (!di.value) di.value = today;
+  // clamp if a future date was somehow already set
+  if (di.value > today) di.value = today;
 });
 
 document.getElementById('scan-btn').addEventListener('click', loadData);
