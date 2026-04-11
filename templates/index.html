@@ -83,8 +83,11 @@
   .data-row { flex:1; min-height:0; overflow:hidden; }
   .data-row > [class*="col-"] { height:100%; }
   .data-row .tbl-card { height:100%; overflow:hidden; display:flex; flex-direction:column; }
-  .data-row .tbl-card.mb-3 { height:auto; flex:none; max-height:62%; }
   .data-row .table-responsive { overflow-y:auto; flex:1; min-height:0; }
+  /* column that stacks SMT + FVG cards */
+  .col-smt-fvg { display:flex; flex-direction:column; gap:8px; }
+  .col-smt-fvg .smt-card { flex:0 0 auto; max-height:55%; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+  .col-smt-fvg .fvg-card { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
 
   /* ── compact tables ── */
   table { font-size: .72rem; }
@@ -305,9 +308,9 @@
     </div>
 
     <!-- SMT + FVG signals -->
-    <div class="col-md-4">
+    <div class="col-md-4 col-smt-fvg">
 
-      <div class="tbl-card mb-3">
+      <div class="tbl-card smt-card">
         <div class="card-header">SMT Signals</div>
         <!-- Alert box lives inside the card so it doesn't push the table out of view -->
         <div id="smt-alert-box" style="display:none; margin:6px 6px 0; border-radius:6px; padding:8px 12px; border-width:2px; border-style:solid;">
@@ -321,7 +324,7 @@
           </table>
         </div>
       </div>
-      <div class="tbl-card">
+      <div class="tbl-card fvg-card">
         <div class="card-header">Active FVGs</div>
         <div class="table-responsive">
           <table class="table table-sm mb-0" id="tbl-fvg">
