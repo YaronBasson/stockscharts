@@ -95,14 +95,22 @@ Two main files + one template:
 2. `get_external_levels(df, ref_time)` — PDH/PDL, TDO, TWO, HOD/LOD, PWH/PWL, NYO, Q1–Q4 H/L
 3. `detect_fvg()` — active (unfilled) Fair Value Gaps; each has `time` (c2) and `start_time` (c3, for chart drawing)
 4. `detect_smt()` — Regular SMT: uses `find_nearest_liquidity()` for swing high/low reference (falls back to rolling window); signals include `ref_mnq_label` / `ref_mes_label` (e.g. "swing high @15:30" or "rolling high @14:45")
-5. `detect_hidden_smt()` — same but uses candle bodies (open/close), not wicks
+5. `detect_hidden_smt()` — same but uses candle bodies (open/close), not wicks; reference found via `find_nearest_body_liquidity()` (3-day swing lookup), rolling window fallback
 6. `detect_fill_smt()` — divergence in how each instrument interacts with its FVG zone
-7. `compute_recommendation()` — weighted score → LONG/SHORT/WAIT with strength
+7. `compute_recommendation()` — 4-factor weighted score → LONG/SHORT/WAIT with strength (liquidity + smt + tdo_two + mnq_divergence, each ×0.25, multiplied by quarter confidence)
 
 **Key helpers:**
-- `find_nearest_liquidity(df, swing_strength)` — finds most recent swing high/low to the left of current candle
+- `find_nearest_liquidity(df, swing_strength)` — finds most recent swing high/low (wicks) to the left of current candle
+- `find_nearest_body_liquidity(df, swing_strength)` — same but uses body extremes (open/close); used by `detect_hidden_smt()`
 - `send_telegram()` — returns `(bool, str)` tuple; reads token live from `os.getenv()`
 - `get_quarter(dt)`, `quarter_range_str()`, `quarter_end_dt()` — quarter time helpers
+
+**Recommendation scoring functions:**
+- `score_liquidity()` — external sweep + FVG zone presence; -1.0 to +1.0
+- `score_smt()` — SMT signals with time decay; Regular=1.0, Hidden=0.7, Fill=0.5
+- `score_quarters()` — confidence multiplier 0.4–1.3 based on quarter + proximity to NY Open
+- `score_tdo_two()` — daily/weekly bias from TDO and TWO; -1.0 to +1.0
+- `score_mnq_divergence()` — cross-instrument structural divergence: one instrument below/above key level + TDO while other holds → ±1.0; explicitly names which instrument to trade
 
 **State:** `last_smt_signal`, `last_fvg_alert` — dedup dicts; reset on restart.
 
@@ -114,6 +122,7 @@ Two main files + one template:
 - `POST /api/alert` — manual Telegram send from `_last_scan_ctx`
 - Auto-pause constants: `AUTO_PAUSE_START=23`, `AUTO_PAUSE_END=14`
 - Twelve Data credit tracking: `TD_CREDITS_PER_SCAN=9`, `TD_DAILY_LIMIT=800`
+- Display cutoff uses actual trading days in data (not calendar days) — `LOOKBACK_DAYS=3` on Monday shows Mon+Fri+Thu, not Mon+weekend+Fri
 - `_build_trade_plan_str(action, mnq_levels, mnq_fvgs, mes_fvgs)` — builds TP1–TP4 candidate pool from named levels + FVG edges, picks stop (nearest named level on opposite side), returns Telegram HTML string including `🛑 Stop (level)` and `⛔ Stop (X%)`
 
 ### `templates/index.html`
@@ -123,3 +132,6 @@ Two main files + one template:
 - FVG shapes: `xref:'x'`, `x0=start_time`, `x1=lastCandleT` — not full-width
 - Hidden SMT: diagonal orange line on both charts connecting reference body level → current body level (shows divergence: one line goes down, other stays flat/up)
 - Fill SMT highlighted FVG: brighter fill + dotted border on the triggering instrument's chart
+- `rangebreaks: [{ bounds: ['sat','mon'] }]` on xaxis — hides weekend gaps; candles jump Friday → Monday with no empty space
+- Y-axis sync: when mirroring X-only scroll, other chart's Y axis is left untouched (was incorrectly reset to autorange)
+- Recommendation panel: 5 factor bars — Liquidity, SMT, TDO/TWO, MNQ Div, Quarter ×

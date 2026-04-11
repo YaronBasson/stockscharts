@@ -66,10 +66,11 @@ TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY", "")
 # Each factor scores -1.0 (SHORT) → 0 (neutral) → +1.0 (LONG).
 # Quarters factor acts as a confidence multiplier (0.4–1.3), not a direction.
 WEIGHTS = {
-    "liquidity": 0.25,
-    "smt":       0.25,
-    "quarters":  0.25,   # multiplier — user will tune
-    "tdo_two":   0.25,
+    "liquidity":      0.25,
+    "smt":            0.25,
+    "quarters":       0.25,   # multiplier — user will tune
+    "tdo_two":        0.25,
+    "mnq_divergence": 0.25,
 }
 QUARTER_CONFIDENCE = {1: 0.4, 2: 0.8, 3: 1.0, 4: 0.6}
 SMT_DECAY_MINUTES  = 30    # signals older than this are ignored
@@ -466,6 +467,45 @@ def find_nearest_liquidity(df: pd.DataFrame, swing_strength: int = SWING_STRENGT
     return swing_low_price, swing_low_time, swing_high_price, swing_high_time
 
 
+def find_nearest_body_liquidity(df: pd.DataFrame, swing_strength: int = SWING_STRENGTH):
+    """
+    Like find_nearest_liquidity() but uses candle BODIES (open/close) instead of wicks.
+    Used for Hidden SMT detection.
+    Returns (body_swing_low_price, body_swing_low_time, body_swing_high_price, body_swing_high_time).
+    """
+    n = swing_strength
+    length = len(df)
+    if length < 2 * n + 1:
+        return None, None, None, None
+
+    body_lows  = df[["open", "close"]].min(axis=1).values
+    body_highs = df[["open", "close"]].max(axis=1).values
+    times = df.index
+
+    swing_low_price  = None
+    swing_low_time   = None
+    swing_high_price = None
+    swing_high_time  = None
+
+    for i in range(length - n - 1, n - 1, -1):
+        if swing_low_price is None:
+            window_low = body_lows[i - n: i + n + 1]
+            if body_lows[i] == window_low.min():
+                swing_low_price = float(body_lows[i])
+                swing_low_time  = times[i]
+
+        if swing_high_price is None:
+            window_high = body_highs[i - n: i + n + 1]
+            if body_highs[i] == window_high.max():
+                swing_high_price = float(body_highs[i])
+                swing_high_time  = times[i]
+
+        if swing_low_price is not None and swing_high_price is not None:
+            break
+
+    return swing_low_price, swing_low_time, swing_high_price, swing_high_time
+
+
 def detect_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
                lookback: int = SMT_LOOKBACK_CANDLES,
                tol: float = SMT_TOLERANCE_PCT) -> list:
@@ -645,10 +685,43 @@ def detect_hidden_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
         idx = body_highs.idxmax()
         return float(body_highs.max()), _fmt(idx), idx
 
-    ref_mnq_low,  mnq_low_t,  mnq_low_ts  = _body_low_candle(win_mnq)
-    ref_mes_low,  mes_low_t,  mes_low_ts  = _body_low_candle(win_mes)
-    ref_mnq_high, mnq_high_t, mnq_high_ts = _body_high_candle(win_mnq)
-    ref_mes_high, mes_high_t, mes_high_ts = _body_high_candle(win_mes)
+    # Extended swing lookup — same 3-day window as detect_smt()
+    three_days_ago = cur_time - timedelta(days=3)
+    mnq_recent = mnq_a[mnq_a.index >= three_days_ago].iloc[:-1]
+    mes_recent = mes_a[mes_a.index >= three_days_ago].iloc[:-1]
+    mnq_bsl, mnq_bsl_t, mnq_bsh, mnq_bsh_t = find_nearest_body_liquidity(mnq_recent)
+    mes_bsl, mes_bsl_t, mes_bsh, mes_bsh_t = find_nearest_body_liquidity(mes_recent)
+    # Extend to full history if either side missing
+    if mnq_bsl is None or mnq_bsh is None:
+        sl2, st2, sh2, sht2 = find_nearest_body_liquidity(mnq_a.iloc[:-1])
+        if mnq_bsl is None: mnq_bsl, mnq_bsl_t = sl2, st2
+        if mnq_bsh is None: mnq_bsh, mnq_bsh_t = sh2, sht2
+    if mes_bsl is None or mes_bsh is None:
+        sl2, st2, sh2, sht2 = find_nearest_body_liquidity(mes_a.iloc[:-1])
+        if mes_bsl is None: mes_bsl, mes_bsl_t = sl2, st2
+        if mes_bsh is None: mes_bsh, mes_bsh_t = sh2, sht2
+
+    # Fallback to rolling window body extremes
+    ref_mnq_low_rb,  mnq_low_t_rb,  mnq_low_ts_rb  = _body_low_candle(win_mnq)
+    ref_mes_low_rb,  mes_low_t_rb,  mes_low_ts_rb  = _body_low_candle(win_mes)
+    ref_mnq_high_rb, mnq_high_t_rb, mnq_high_ts_rb = _body_high_candle(win_mnq)
+    ref_mes_high_rb, mes_high_t_rb, mes_high_ts_rb = _body_high_candle(win_mes)
+
+    ref_mnq_low  = mnq_bsl   if mnq_bsl   is not None else ref_mnq_low_rb
+    mnq_low_ts   = mnq_bsl_t if mnq_bsl_t is not None else mnq_low_ts_rb
+    mnq_low_t    = _fmt(mnq_low_ts) if mnq_bsl_t is not None else mnq_low_t_rb
+
+    ref_mes_low  = mes_bsl   if mes_bsl   is not None else ref_mes_low_rb
+    mes_low_ts   = mes_bsl_t if mes_bsl_t is not None else mes_low_ts_rb
+    mes_low_t    = _fmt(mes_low_ts) if mes_bsl_t is not None else mes_low_t_rb
+
+    ref_mnq_high = mnq_bsh   if mnq_bsh   is not None else ref_mnq_high_rb
+    mnq_high_ts  = mnq_bsh_t if mnq_bsh_t is not None else mnq_high_ts_rb
+    mnq_high_t   = _fmt(mnq_high_ts) if mnq_bsh_t is not None else mnq_high_t_rb
+
+    ref_mes_high = mes_bsh   if mes_bsh   is not None else ref_mes_high_rb
+    mes_high_ts  = mes_bsh_t if mes_bsh_t is not None else mes_high_ts_rb
+    mes_high_t   = _fmt(mes_high_ts) if mes_bsh_t is not None else mes_high_t_rb
 
     cur_mnq_body_low  = min(float(cur_mnq["open"]), float(cur_mnq["close"]))
     cur_mes_body_low  = min(float(cur_mes["open"]), float(cur_mes["close"]))
@@ -918,6 +991,67 @@ def score_tdo_two(current, tdo, two) -> tuple:
     return score, reasons
 
 
+def score_mnq_divergence(mnq_levels, mes_levels) -> tuple:
+    """
+    Cross-instrument structural divergence — either instrument can be the leading one.
+
+    LONG:  One instrument has ≥2 downside indicators (below a low liquidity level
+           + below TDO) while the other holds → trade LONG on the holding instrument.
+           e.g. MNQ swept below PDL + below TDO, MES held → buy MES.
+           e.g. MES swept below PDL + below TDO, MNQ held → buy MNQ.
+
+    SHORT: One instrument has ≥2 upside indicators (above a high liquidity level
+           + above TDO) while the other holds → trade SHORT on the holding instrument.
+           e.g. MES swept above PDH + above TDO, MNQ held → sell MNQ.
+           e.g. MNQ swept above PDH + above TDO, MES held → sell MES.
+
+    Returns (score: float, reasons: list).
+    """
+    if not mnq_levels or not mes_levels:
+        return 0.0, []
+
+    mnq_cur = mnq_levels.get("CURRENT", 0)
+    mes_cur = mes_levels.get("CURRENT", 0)
+    if not mnq_cur or not mes_cur:
+        return 0.0, []
+
+    low_names  = ("PDL", "PWL", "LOD")
+    high_names = ("PDH", "PWH", "HOD")
+
+    def _downside(levels, cur):
+        liq = next((n for n in low_names  if levels.get(n) and cur < levels[n]), None)
+        tdo = bool(levels.get("TDO") and cur < levels["TDO"])
+        return sum([liq is not None, tdo]), liq
+
+    def _upside(levels, cur):
+        liq = next((n for n in high_names if levels.get(n) and cur > levels[n]), None)
+        tdo = bool(levels.get("TDO") and cur > levels["TDO"])
+        return sum([liq is not None, tdo]), liq
+
+    mnq_down, mnq_down_liq = _downside(mnq_levels, mnq_cur)
+    mes_down, mes_down_liq = _downside(mes_levels, mes_cur)
+    mnq_up,   mnq_up_liq  = _upside(mnq_levels,   mnq_cur)
+    mes_up,   mes_up_liq  = _upside(mes_levels,    mes_cur)
+
+    # ── LONG: MNQ swept below, MES held ──
+    if mnq_down >= 2 and mes_down < 2:
+        return +1.0, [f"MNQ divergence LONG: below {mnq_down_liq} + below TDO, MES held → buy MES"]
+
+    # ── LONG: MES swept below, MNQ held ──
+    if mes_down >= 2 and mnq_down < 2:
+        return +1.0, [f"MES divergence LONG: below {mes_down_liq} + below TDO, MNQ held → buy MNQ"]
+
+    # ── SHORT: MES swept above, MNQ held ──
+    if mes_up >= 2 and mnq_up < 2:
+        return -1.0, [f"MES divergence SHORT: above {mes_up_liq} + above TDO, MNQ held → sell MNQ"]
+
+    # ── SHORT: MNQ swept above, MES held ──
+    if mnq_up >= 2 and mes_up < 2:
+        return -1.0, [f"MNQ divergence SHORT: above {mnq_up_liq} + above TDO, MES held → sell MES"]
+
+    return 0.0, []
+
+
 def compute_recommendation(mnq_df, mes_df, mnq_levels, mes_levels,
                             mnq_fvgs, mes_fvgs,
                             regular_smts, hidden_smts, fill_smts,
@@ -934,11 +1068,13 @@ def compute_recommendation(mnq_df, mes_df, mnq_levels, mes_levels,
     s_smt, r_smt   = score_smt(regular_smts, hidden_smts, fill_smts, ref_time)
     q_mult         = score_quarters(ref_time)
     s_bias, r_bias = score_tdo_two(current, tdo, two)
+    s_div,  r_div  = score_mnq_divergence(mnq_levels, mes_levels)
 
     # Normalize weights (exclude quarters — it's a multiplier)
     w = WEIGHTS
-    denom = w["liquidity"] + w["smt"] + w["tdo_two"]
-    raw   = (s_liq * w["liquidity"] + s_smt * w["smt"] + s_bias * w["tdo_two"]) / denom
+    denom = w["liquidity"] + w["smt"] + w["tdo_two"] + w["mnq_divergence"]
+    raw   = (s_liq * w["liquidity"] + s_smt * w["smt"]
+             + s_bias * w["tdo_two"] + s_div * w["mnq_divergence"]) / denom
     final = max(-1.0, min(1.0, raw * q_mult))
 
     if   final >=  RECOMMEND_STRONG:   action, strength = "LONG",  "STRONG"
@@ -951,6 +1087,7 @@ def compute_recommendation(mnq_df, mes_df, mnq_levels, mes_levels,
     if abs(s_liq) >= 0.3: reasons.extend(r_liq)
     reasons.extend(r_smt)   # always show SMT breakdown
     if abs(s_bias) >= 0.3: reasons.extend(r_bias)
+    if s_div != 0.0:       reasons.extend(r_div)
 
     return {
         "action":       action,
@@ -959,9 +1096,10 @@ def compute_recommendation(mnq_df, mes_df, mnq_levels, mes_levels,
         "raw_score":    round(raw, 3),
         "quarter_mult": q_mult,
         "scores": {
-            "liquidity": round(s_liq, 3),
-            "smt":       round(s_smt, 3),
-            "tdo_two":   round(s_bias, 3),
+            "liquidity":      round(s_liq, 3),
+            "smt":            round(s_smt, 3),
+            "tdo_two":        round(s_bias, 3),
+            "mnq_divergence": round(s_div, 3),
         },
         "weights":  {k: v for k, v in w.items()},
         "reasons":  reasons,
@@ -1423,7 +1561,8 @@ def run_scan(sim_time=None, date_mode=False, notify=False, timeframe=None):
     print(f"  factors:  "
           f"liq {s['liquidity']:+.2f}×{w['liquidity']}  "
           f"smt {s['smt']:+.2f}×{w['smt']}  "
-          f"tdo/two {s['tdo_two']:+.2f}×{w['tdo_two']}")
+          f"tdo/two {s['tdo_two']:+.2f}×{w['tdo_two']}  "
+          f"mnq_div {s['mnq_divergence']:+.2f}×{w['mnq_divergence']}")
     for reason in rec["reasons"]:
         print(f"  {Fore.CYAN}{reason}{Style.RESET_ALL}")
 

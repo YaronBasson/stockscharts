@@ -802,3 +802,119 @@ Note: step arrows (◄/►) and keyboard ←/→ already called `loadData()` via
 | File | Status |
 |---|---|
 | `templates/index.html` | Hidden SMT diagonal line; date picker and hour buttons now auto-load |
+
+---
+
+## SESSION 7 — Completed: 2026-04-11
+
+### Overview
+Five fixes and improvements this session:
+1. Hidden SMT detection extended to use swing body lookback (was limited to 10-candle rolling window)
+2. Chart Y-axis sync bug fix — other chart was resetting on X-only scroll
+3. New cross-instrument structural divergence scoring factor (`score_mnq_divergence`)
+4. Weekend gap removed from charts using Plotly `rangebreaks`
+5. `LOOKBACK_DAYS` now counts real trading days, not calendar days
+
+---
+
+### 1. Hidden SMT — Extended Lookback via Swing Body Levels
+
+**Problem:** `detect_hidden_smt()` used a fixed 10-candle rolling window (`SMT_LOOKBACK_CANDLES`) to find the reference body low/high. At 15m intervals, a reference candle at 01:00 is 44 candles before 12:00 — completely outside the window. Signals were missed.
+
+**Example missed:** May 14 2025 — 01:00 body low was the reference; at 12:00 MES body dropped below it while MNQ held. No signal fired.
+
+**New function: `find_nearest_body_liquidity(df, swing_strength=SWING_STRENGTH)`** (`ict_smt_agent.py`)
+- Identical structure to `find_nearest_liquidity()` but uses body extremes: `min/max(open, close)` per candle instead of `low/high`
+- Scans right-to-left, returns `(body_swing_low_price, body_swing_low_time, body_swing_high_price, body_swing_high_time)`
+
+**`detect_hidden_smt()` changes:**
+- Now mirrors `detect_smt()` architecture: scans last 3 days for nearest swing body high/low via `find_nearest_body_liquidity()`
+- Falls back to full history if 3-day window yields `None`
+- Falls back to 10-candle rolling window body extremes only as last resort
+- Reference timestamps (`ref_mnq_time`, `ref_mes_time`) now correctly point to the swing body candle, so diagonal lines draw from the right origin
+
+---
+
+### 2. Chart Y-Axis Sync Bug Fix
+
+**Problem:** In `syncLockedMovement()`, when doing a pure X scroll/zoom (no Y change in the relayout event), the `else` branch set `yaxis.autorange: true` on the other chart, resetting it to show all data (full zoom-out). Looked like a "reset".
+
+**Fix (`templates/index.html`):**
+Removed the `else { update['yaxis.autorange'] = true; }` branch. When `y0` is undefined (pure X movement), the other chart's Y axis is now left completely untouched.
+
+---
+
+### 3. Cross-Instrument Structural Divergence Score
+
+**New function: `score_mnq_divergence(mnq_levels, mes_levels)`** (`ict_smt_agent.py`)
+
+Detects when one instrument has ≥2 structural indicators in one direction that the other instrument does NOT confirm:
+
+| Diverging instrument | Conditions (≥2) | Other holds | Signal | Trade on |
+|---|---|---|---|---|
+| MNQ | below PDL/PWL/LOD + below TDO | MES < 2 indicators | LONG +1.0 | MES |
+| MES | below PDL/PWL/LOD + below TDO | MNQ < 2 indicators | LONG +1.0 | MNQ |
+| MES | above PDH/PWH/HOD + above TDO | MNQ < 2 indicators | SHORT -1.0 | MNQ |
+| MNQ | above PDH/PWH/HOD + above TDO | MES < 2 indicators | SHORT -1.0 | MES |
+
+Returns `(score: float, reasons: list)`. Reason text explicitly names which instrument to trade (e.g. `"MES divergence SHORT: above PDH + above TDO, MNQ held → sell MNQ"`).
+
+**`WEIGHTS` updated:**
+```python
+WEIGHTS = {
+    "liquidity":      0.25,
+    "smt":            0.25,
+    "quarters":       0.25,
+    "tdo_two":        0.25,
+    "mnq_divergence": 0.25,   # new
+}
+```
+Denominator in `compute_recommendation()` is now exactly 1.0 (`w["liquidity"] + w["smt"] + w["tdo_two"] + w["mnq_divergence"]`).
+
+**Terminal output:**
+```
+factors:  liq +0.00×0.25  smt +1.00×0.25  tdo/two -0.76×0.25  mnq_div +1.00×0.25
+```
+
+**Web dashboard:** New "MNQ Div" bar added to recommendation panel (5th factor bar). Quarter × bar moved to its own full-width row below the 2×2 grid.
+
+---
+
+### 4. Weekend Gap Removed from Charts
+
+**Problem:** Plotly `xaxis type:'date'` rendered calendar time including weekends, leaving empty space between Friday's last candle and Monday's first candle.
+
+**Fix (`templates/index.html` — `buildChart()`):**
+```javascript
+xaxis: {
+  ...
+  rangebreaks: [
+    { bounds: ['sat', 'mon'] },   // skip Sat–Sun gap
+  ],
+}
+```
+Plotly hides the Saturday–Sunday range visually while keeping all shape/annotation datetime values intact.
+
+---
+
+### 5. Display Window: Calendar Days → Trading Days
+
+**Problem:** `LOOKBACK_DAYS=3` on a Monday subtracted 3 calendar days, giving Monday + (weekend = no data) + Friday — only 2 real trading days visible.
+
+**Fix (`web_app.py`):**
+```python
+trading_dates = sorted(mnq_df.index.normalize().unique())
+if len(trading_dates) >= LOOKBACK_DAYS:
+    display_cutoff = trading_dates[-LOOKBACK_DAYS].to_pydatetime().replace(tzinfo=ISRAEL_TZ)
+```
+Counts distinct dates that actually have candle data — only real trading days appear. `LOOKBACK_DAYS=3` on Monday now shows Mon + Fri + Thu. Also handles holidays automatically.
+
+---
+
+### Files Status
+
+| File | Status |
+|---|---|
+| `ict_smt_agent.py` | `find_nearest_body_liquidity()` added; `detect_hidden_smt()` uses swing body lookup; `score_mnq_divergence()` added; `WEIGHTS` updated with `mnq_divergence`; `compute_recommendation()` wired; terminal factors line updated |
+| `web_app.py` | Display cutoff now counts trading days instead of calendar days |
+| `templates/index.html` | Y-axis sync bug fixed; `rangebreaks` weekend gap removed; MNQ Div factor bar added to recommendation panel |

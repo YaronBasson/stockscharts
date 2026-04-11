@@ -609,8 +609,13 @@ def api_scan():
         _td_record_scan()
         td_info = _td_stats()
 
-    # Trim candles to LOOKBACK_DAYS for display (swing detection already ran on full 7-day data)
-    display_cutoff = ref_time - timedelta(days=LOOKBACK_DAYS)
+    # Trim candles to LOOKBACK_DAYS trading days for display (skips weekends/holidays).
+    # Count distinct calendar dates present in the data — only real trading days appear.
+    trading_dates = sorted(mnq_df.index.normalize().unique())
+    if len(trading_dates) >= LOOKBACK_DAYS:
+        display_cutoff = trading_dates[-LOOKBACK_DAYS].to_pydatetime().replace(tzinfo=ISRAEL_TZ)
+    else:
+        display_cutoff = trading_dates[0].to_pydatetime().replace(tzinfo=ISRAEL_TZ) if trading_dates else ref_time - timedelta(days=LOOKBACK_DAYS)
     mnq_display = mnq_df[mnq_df.index >= display_cutoff]
     mes_display = mes_df[mes_df.index >= display_cutoff]
 

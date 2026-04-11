@@ -270,19 +270,19 @@
     </div>
   </div>
 
-  <!-- bottom data row -->
+  <!-- bottom data row — 4 columns: Quarters | Levels | SMT+FVG | Trade Rec -->
   <div class="row g-3 data-row">
 
     <!-- Quarters table -->
-    <div class="col-md-4">
+    <div class="col-3">
       <div class="tbl-card h-100">
-        <div class="card-header">Quarters (Israel Time)</div>
+        <div class="card-header">Quarters (IL)</div>
         <div class="table-responsive">
           <table class="table table-sm table-hover mb-0" id="tbl-quarters">
             <thead><tr>
               <th>Q</th><th>Range</th>
-              <th class="text-end" style="color:#58a6ff">MNQ H</th><th class="text-end" style="color:#58a6ff">MNQ L</th>
-              <th class="text-end" style="color:#f0883e">MES H</th><th class="text-end" style="color:#f0883e">MES L</th>
+              <th class="text-end" style="color:#58a6ff">MNQ H</th><th class="text-end" style="color:#58a6ff">L</th>
+              <th class="text-end" style="color:#f0883e">MES H</th><th class="text-end" style="color:#f0883e">L</th>
             </tr></thead>
             <tbody></tbody>
           </table>
@@ -291,7 +291,7 @@
     </div>
 
     <!-- Levels table -->
-    <div class="col-md-4">
+    <div class="col-2">
       <div class="tbl-card h-100">
         <div class="card-header">Levels</div>
         <div class="table-responsive">
@@ -308,14 +308,13 @@
     </div>
 
     <!-- SMT + FVG signals -->
-    <div class="col-md-4 col-smt-fvg">
+    <div class="col-3 col-smt-fvg">
 
       <div class="tbl-card smt-card">
         <div class="card-header">SMT Signals</div>
-        <!-- Alert box lives inside the card so it doesn't push the table out of view -->
-        <div id="smt-alert-box" style="display:none; margin:6px 6px 0; border-radius:6px; padding:8px 12px; border-width:2px; border-style:solid;">
-          <div style="font-size:.78rem; font-weight:700; margin-bottom:4px" id="smt-alert-title"></div>
-          <div style="font-size:.72rem; line-height:1.5" id="smt-alert-body"></div>
+        <div id="smt-alert-box" style="display:none; margin:6px 6px 0; border-radius:6px; padding:6px 10px; border-width:2px; border-style:solid;">
+          <div style="font-size:.75rem; font-weight:700; margin-bottom:3px" id="smt-alert-title"></div>
+          <div style="font-size:.7rem; line-height:1.4" id="smt-alert-body"></div>
         </div>
         <div class="table-responsive">
           <table class="table table-sm mb-0" id="tbl-smt">
@@ -335,75 +334,68 @@
       </div>
     </div>
 
-  </div><!-- /row -->
-
-  <!-- Recommendation panel -->
-  <div class="row g-3 mt-1" id="rec-row" style="display:none!important">
-    <div class="col-12">
-      <div id="rec-panel">
-        <div class="card-header d-flex align-items-center gap-2">
-          Trade Recommendation
-          <span id="rec-quarter-info" class="ms-2 text-secondary" style="font-size:.72rem"></span>
+    <!-- Trade Recommendation — right column -->
+    <div class="col-4" id="rec-col" style="display:none">
+      <div id="rec-panel" style="height:100%; overflow:hidden; display:flex; flex-direction:column;">
+        <div class="card-header d-flex align-items-center gap-2" style="flex-shrink:0">
+          Trade Rec
+          <span id="rec-quarter-info" class="ms-auto text-secondary" style="font-size:.68rem"></span>
         </div>
-        <div class="p-3">
-          <div class="row g-3 align-items-start">
+        <div style="flex:1; min-height:0; overflow-y:auto; padding:8px 10px;">
 
-            <!-- Action + score -->
-            <div class="col-auto d-flex flex-column align-items-center gap-2">
-              <div id="rec-action-badge">—</div>
-              <div id="rec-strength" class="text-center"></div>
-              <div class="text-secondary" style="font-size:.72rem">Score: <span id="rec-score-val">—</span></div>
-            </div>
-
-            <!-- Factor breakdown -->
-            <div class="col">
-              <div class="row g-2">
-                <!-- liquidity -->
-                <div class="col-md-3 col-6">
-                  <div class="text-secondary mb-1" style="font-size:.72rem">Liquidity <span id="rec-liq-w" class="text-muted"></span></div>
-                  <div class="rec-score-bar"><div id="rec-liq-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-                  <div id="rec-liq-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
-                </div>
-                <!-- SMT -->
-                <div class="col-md-3 col-6">
-                  <div class="text-secondary mb-1" style="font-size:.72rem">SMT <span id="rec-smt-w" class="text-muted"></span></div>
-                  <div class="rec-score-bar"><div id="rec-smt-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-                  <div id="rec-smt-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
-                </div>
-                <!-- TDO/TWO -->
-                <div class="col-md-3 col-6">
-                  <div class="text-secondary mb-1" style="font-size:.72rem">TDO/TWO <span id="rec-tdo-w" class="text-muted"></span></div>
-                  <div class="rec-score-bar"><div id="rec-tdo-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-                  <div id="rec-tdo-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
-                </div>
-                <!-- Quarter multiplier -->
-                <div class="col-md-3 col-6">
-                  <div class="text-secondary mb-1" style="font-size:.72rem">Quarter ×</div>
-                  <div class="rec-score-bar"><div id="rec-q-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-                  <div id="rec-q-val" class="text-secondary" style="font-size:.7rem; margin-top:2px">—</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Reasons -->
-            <div class="col-md-3">
-              <div class="text-secondary mb-1" style="font-size:.72rem">Analysis</div>
-              <ul id="rec-reasons" class="list-unstyled mb-0" style="font-size:.72rem"></ul>
-            </div>
-
+          <!-- Action + strength + score (one compact line) -->
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <div id="rec-action-badge">—</div>
+            <div id="rec-strength"></div>
+            <div class="text-secondary ms-auto" style="font-size:.7rem">Score: <span id="rec-score-val">—</span></div>
           </div>
 
-          <!-- Trade Plan — full-width, shown only for LONG/SHORT -->
-          <div id="rec-trade-plan" style="display:none; border-top:1px solid #30363d; margin-top:10px; padding-top:10px">
-            <div class="text-secondary mb-2" style="font-size:.72rem">Trade Plan (MNQ)</div>
-            <table style="width:100%; font-size:.75rem; font-family:monospace; border-collapse:collapse" id="rec-trade-table">
+          <!-- Factor bars: 2×2 grid -->
+          <div class="row g-1 mb-2">
+            <div class="col-6">
+              <div class="text-secondary" style="font-size:.68rem">Liquidity <span id="rec-liq-w" class="text-muted"></span></div>
+              <div class="rec-score-bar"><div id="rec-liq-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <div id="rec-liq-val" class="text-secondary" style="font-size:.68rem">—</div>
+            </div>
+            <div class="col-6">
+              <div class="text-secondary" style="font-size:.68rem">SMT <span id="rec-smt-w" class="text-muted"></span></div>
+              <div class="rec-score-bar"><div id="rec-smt-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <div id="rec-smt-val" class="text-secondary" style="font-size:.68rem">—</div>
+            </div>
+            <div class="col-6">
+              <div class="text-secondary" style="font-size:.68rem">TDO/TWO <span id="rec-tdo-w" class="text-muted"></span></div>
+              <div class="rec-score-bar"><div id="rec-tdo-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <div id="rec-tdo-val" class="text-secondary" style="font-size:.68rem">—</div>
+            </div>
+            <div class="col-6">
+              <div class="text-secondary" style="font-size:.68rem">MNQ Div <span id="rec-div-w" class="text-muted"></span></div>
+              <div class="rec-score-bar"><div id="rec-div-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <div id="rec-div-val" class="text-secondary" style="font-size:.68rem">—</div>
+            </div>
+          </div>
+          <div class="row g-1 mb-2">
+            <div class="col-12">
+              <div class="text-secondary" style="font-size:.68rem">Quarter ×</div>
+              <div class="rec-score-bar"><div id="rec-q-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <div id="rec-q-val" class="text-secondary" style="font-size:.68rem">—</div>
+            </div>
+          </div>
+
+          <!-- Analysis reasons -->
+          <div class="text-secondary mb-1" style="font-size:.68rem">Analysis</div>
+          <ul id="rec-reasons" class="list-unstyled mb-2" style="font-size:.68rem"></ul>
+
+          <!-- Trade Plan -->
+          <div id="rec-trade-plan" style="display:none; border-top:1px solid #30363d; padding-top:8px">
+            <div class="text-secondary mb-1" style="font-size:.68rem">Trade Plan (MNQ)</div>
+            <table style="width:100%; font-size:.72rem; font-family:monospace; border-collapse:collapse">
               <thead>
-                <tr style="color:#8b949e; font-size:.68rem">
-                  <th style="padding:2px 10px 4px 0; font-weight:400">Level</th>
-                  <th style="padding:2px 10px 4px 0; font-weight:400; text-align:right">Price</th>
-                  <th style="padding:2px 10px 4px 0; font-weight:400; text-align:right">Pts</th>
-                  <th style="padding:2px 10px 4px 0; font-weight:400; text-align:right">R/R</th>
-                  <th style="padding:2px 0    4px 0; font-weight:400">Source</th>
+                <tr style="color:#8b949e; font-size:.65rem">
+                  <th style="padding:2px 6px 3px 0; font-weight:400">Level</th>
+                  <th style="padding:2px 6px 3px 0; font-weight:400; text-align:right">Price</th>
+                  <th style="padding:2px 6px 3px 0; font-weight:400; text-align:right">Pts</th>
+                  <th style="padding:2px 6px 3px 0; font-weight:400; text-align:right">R/R</th>
+                  <th style="padding:2px 0   3px 0; font-weight:400">Source</th>
                 </tr>
               </thead>
               <tbody id="rec-trade-tbody"></tbody>
@@ -413,7 +405,8 @@
         </div>
       </div>
     </div>
-  </div><!-- /rec-row -->
+
+  </div><!-- /data-row -->
 
 </div><!-- /container -->
 
@@ -494,9 +487,8 @@ function syncLockedMovement(srcDiv, x0, x1, y0, y1) {
       update['yaxis.range[0]'] = tgtMid - srcRng * ratio / 2;
       update['yaxis.range[1]'] = tgtMid + srcRng * ratio / 2;
     }
-  } else {
-    update['yaxis.autorange'] = true;
   }
+  // When y0 is undefined (pure X scroll/zoom), leave the other chart's Y axis untouched.
 
   if (Object.keys(update).length) {
     Plotly.relayout(tgtDiv, update).then(() => { isSyncing = false; });
@@ -710,8 +702,14 @@ function savedZoom(divId) {
   };
 }
 
+// Force both charts to auto-range on next render (used when jumping to a new time)
+function clearChartsZoom() {
+  chartWasDefault['chart-mnq'] = true;
+  chartWasDefault['chart-mes'] = true;
+}
+
 async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice, ticker, hiddenSmts = [], fillSmts = []) {
-  const zoom = savedZoom(divId);   // capture before react() resets it (also sets chartWasDefault)
+  const zoom = chartWasDefault[divId] ? null : savedZoom(divId);   // null = auto-range
   if (candles.length) chartLatestTime[divId] = candles[candles.length - 1].t;
   const ts   = candles.map(c => c.t);
   const open = candles.map(c => c.o);
@@ -872,6 +870,9 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
       hoverformat:'%d/%m/%Y %H:%M',
       color:'#8b949e',
       tickangle: 0,
+      rangebreaks:[
+        { bounds:['sat','mon'] },   // skip Sat–Sun gap
+      ],
     },
     yaxis:{
       showgrid:true, gridcolor:'#21262d',
@@ -1249,9 +1250,9 @@ function renderFvgs(mnqFvgs, mesFvgs) {
    Recommendation panel
 ════════════════════════════════════════════════════════════════ */
 function renderRecommendation(rec, quarter, levels, current, mnqFvgs = [], mesFvgs = []) {
-  const row = document.getElementById('rec-row');
-  if (!rec) { row.style.setProperty('display','none','important'); return; }
-  row.style.removeProperty('display');
+  const row = document.getElementById('rec-col');
+  if (!rec) { row.style.display = 'none'; return; }
+  row.style.display = '';
 
   // Action badge
   const action = (rec.action || 'WAIT').toUpperCase();
@@ -1298,9 +1299,10 @@ function renderRecommendation(rec, quarter, levels, current, mnqFvgs = [], mesFv
 
   const s = rec.scores || {};
   const w = rec.weights || {};
-  setBar('rec-liq-bar', 'rec-liq-val', 'rec-liq-w', s.liquidity ?? 0, w.liquidity);
-  setBar('rec-smt-bar', 'rec-smt-val', 'rec-smt-w', s.smt ?? 0,       w.smt);
-  setBar('rec-tdo-bar', 'rec-tdo-val', 'rec-tdo-w', s.tdo_two ?? 0,   w.tdo_two);
+  setBar('rec-liq-bar', 'rec-liq-val', 'rec-liq-w', s.liquidity ?? 0,       w.liquidity);
+  setBar('rec-smt-bar', 'rec-smt-val', 'rec-smt-w', s.smt ?? 0,             w.smt);
+  setBar('rec-tdo-bar', 'rec-tdo-val', 'rec-tdo-w', s.tdo_two ?? 0,         w.tdo_two);
+  setBar('rec-div-bar', 'rec-div-val', 'rec-div-w', s.mnq_divergence ?? 0,  w.mnq_divergence);
 
   // Quarter multiplier bar: scale 0..1.3 → 0..100%
   const qMult = rec.quarter_mult ?? 1.0;
@@ -1669,6 +1671,7 @@ function stepTime(dir) {
   selectedMinute = total % 60;
   syncHourButtons();
   updateStepDisplay();
+  clearChartsZoom();
   loadData();
 }
 
@@ -1678,11 +1681,13 @@ document.querySelectorAll('.btn-hour').forEach(btn => {
     selectedMinute = 0;
     syncHourButtons();
     updateStepDisplay();
+    clearChartsZoom();
     loadData();
   });
 });
 
 document.getElementById('date-input').addEventListener('change', () => {
+  clearChartsZoom();
   loadData();
 });
 
@@ -1737,6 +1742,12 @@ document.querySelectorAll('.btn-tf').forEach(btn => {
     document.querySelectorAll('.btn-tf').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     selectedTf = btn.dataset.tf;
+    // Round current minute down to the new TF boundary (e.g. 14:15 → 14:00 when switching to 1H)
+    const step = TF_MINUTES[selectedTf] || 15;
+    selectedMinute = Math.floor(selectedMinute / step) * step;
+    syncHourButtons();
+    updateStepDisplay();
+    clearChartsZoom();
     loadData();
   });
 });
