@@ -319,7 +319,7 @@
         </div>
         <div class="table-responsive">
           <table class="table table-sm mb-0" id="tbl-smt">
-            <thead><tr><th>Dir</th><th>Type</th><th>Time</th><th>Detail</th></tr></thead>
+            <thead><tr><th>Dir</th><th>Type</th><th>Time</th><th>Age</th><th>Detail</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1019,10 +1019,10 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
       srcXh.style.display = 'block';
 
       // ── timestamp at cursor ──
-      const xRange = srcLayout.xaxis.range;
-      const xStart = new Date(xRange[0]).getTime();
-      const xEnd   = new Date(xRange[1]).getTime();
-      const xMs    = xStart + (xInPl / plotW) * (xEnd - xStart);
+      // Use Plotly's axis.p2c() which accounts for rangebreaks (weekend gaps).
+      // Linear interpolation from xaxis.range would land in the removed gap when
+      // hovering over Monday candles after a Fri→Mon weekend break.
+      const xMs = srcLayout.xaxis.p2c(xInPl);
 
       // ── source info bar ──
       const srcPt = findClosestPoint(divId, xMs);
@@ -1162,12 +1162,12 @@ function smtKind(type) {
   return 'Regular SMT';
 }
 
-function renderSmt(signals, hiddenSmts, fillSmts) {
-  const all = [
-    ...signals.map(s => ({...s, _kind:'Regular SMT'})),
-    ...hiddenSmts.map(s => ({...s, _kind:'Hidden SMT'})),
-    ...fillSmts.map(s => ({...s, _kind: smtKind(s.type)})),
-  ].sort((a, b) => (b.time > a.time ? 1 : -1));
+function renderSmt(activeSignals) {
+  // activeSignals is already sorted newest-first by the backend
+  const all = (activeSignals || []).map(s => ({
+    ...s,
+    _kind: smtKind(s.type || s.subtype),
+  }));
 
   const tbody = document.querySelector('#tbl-smt tbody');
   tbody.innerHTML = '';
@@ -1176,7 +1176,7 @@ function renderSmt(signals, hiddenSmts, fillSmts) {
   const body  = document.getElementById('smt-alert-body');
 
   if (!all.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="text-secondary text-center">No signals</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="text-secondary text-center">No signals</td></tr>';
     box.style.display = 'none';
     return;
   }
@@ -1186,7 +1186,9 @@ function renderSmt(signals, hiddenSmts, fillSmts) {
   const isLong = (s.direction || '').includes('LONG');
   box.style.display = 'block';
   box.className = isLong ? 'long-alert' : 'short-alert';
-  title.textContent = `${isLong ? '▲ LONG' : '▼ SHORT'} — ${s._kind} @ ${s.time.slice(11,16)}`;
+  const ageMin = Math.round((Date.now() - new Date(s.time).getTime()) / 60000);
+  const ageStr = ageMin <= 1 ? 'just now' : `${ageMin}m ago`;
+  title.textContent = `${isLong ? '▲ LONG' : '▼ SHORT'} — ${s._kind} @ ${s.time.slice(11,16)} (${ageStr})`;
 
   const hasVals = s.mnq_val != null && s.ref_mnq != null;
   const mnqLbl = s.ref_mnq_label || 'ref';
@@ -1208,14 +1210,18 @@ function renderSmt(signals, hiddenSmts, fillSmts) {
     <div style="margin-top:4px; color:#ccc; font-size:.7rem">${s.detail}</div>
   ` : `${fvgLine}<div style="color:#ccc; font-size:.7rem">${s.detail}</div>`;
 
-  // Table — all signals
+  // Table — all active signals with age
   for (const s of all) {
     const isL = (s.direction || '').includes('LONG');
+    const rowAgeMin = Math.round((Date.now() - new Date(s.time).getTime()) / 60000);
+    const rowAge = rowAgeMin <= 1 ? 'now' : `${rowAgeMin}m`;
+    const ageColor = rowAgeMin > 45 ? '#8b949e' : rowAgeMin > 20 ? '#ffa657' : '#e6edf3';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="${isL ? 'smt-long' : 'smt-short'}">${isL ? '▲' : '▼'}</td>
       <td style="font-size:.68rem;color:#8b949e">${s._kind}</td>
       <td>${s.time.slice(11,16)}</td>
+      <td style="font-size:.68rem;color:${ageColor};min-width:32px">${rowAge}</td>
       <td style="font-size:.68rem">${s.detail}</td>
     `;
     tbody.appendChild(tr);
@@ -1526,7 +1532,7 @@ async function render(data) {
   // tables
   renderQuarters(data.quarters_today);
   renderLevels(data.mnq.levels, data.mes.levels, data.mnq.current, data.mes.current);
-  renderSmt(data.smt_signals, data.hidden_smts || [], data.fill_smts || []);
+  renderSmt(data.active_signals || []);
   renderFvgs(data.mnq.fvgs, data.mes.fvgs);
   renderRecommendation(data.recommendation, data.quarter, data.mnq.levels, data.mnq.current, data.mnq.fvgs || [], data.mes.fvgs || []);
   updateAlertBtn(data);

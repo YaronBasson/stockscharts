@@ -60,6 +60,46 @@ _last_rec_alert: dict = {}
 # ── Last scan context (for manual Telegram trigger) ───────────
 _last_scan_ctx: dict = {}
 
+# ── Active signal log (live mode only) ────────────────────────
+# Keeps signals fired within the last SIGNAL_WINDOW_MINUTES.
+# A signal in the opposite direction clears older signals.
+SIGNAL_WINDOW_MINUTES = 60
+_signal_log: list = []
+
+def _update_signal_log(new_signals: list, ref_time, is_hist: bool):
+    """
+    Accumulate live signals into _signal_log.
+    Rules:
+      - Expire entries older than SIGNAL_WINDOW_MINUTES
+      - If a LONG fires, drop any stored SHORT signals (direction switched)
+      - If a SHORT fires, drop any stored LONG signals
+      - Deduplicate by (time, type)
+    """
+    global _signal_log
+    if is_hist:
+        return
+
+    cutoff_iso = (ref_time - timedelta(minutes=SIGNAL_WINDOW_MINUTES)).isoformat()
+    _signal_log = [s for s in _signal_log if s["time"] >= cutoff_iso]
+
+    if not new_signals:
+        return
+
+    has_new_long  = any("LONG"  in s.get("direction", "") for s in new_signals)
+    has_new_short = any("SHORT" in s.get("direction", "") for s in new_signals)
+
+    if has_new_short:
+        _signal_log = [s for s in _signal_log if "SHORT" in s.get("direction", "")]
+    if has_new_long:
+        _signal_log = [s for s in _signal_log if "LONG"  in s.get("direction", "")]
+
+    existing = {(s["time"], s.get("type", s.get("subtype", ""))) for s in _signal_log}
+    for sig in new_signals:
+        key = (sig["time"], sig.get("type", sig.get("subtype", "")))
+        if key not in existing:
+            _signal_log.append(sig)
+            existing.add(key)
+
 # ── Pause state ───────────────────────────────────────────────
 # Auto-pause: NYSE closes ~23:00 IL; resume at 14:00 IL.
 # Manual override: user button toggles _pause_manual (True/False).
@@ -225,6 +265,24 @@ def fill_smt_to_dict(s):
         "fvg_type":        s.get("fvg_type"),
         "fvg_start_time":  s["fvg_start_time"].isoformat() if s.get("fvg_start_time") else None,
     }
+
+
+def _get_active_signals(smt_sigs, hidden_smts, fill_smts, ref_time, is_hist: bool) -> list:
+    """
+    Serialize current-scan signals, update the rolling log, return the full
+    active log sorted newest-first.  In historical mode returns only the
+    current scan's signals (no accumulation).
+    """
+    current_ser = (
+        [smt_to_dict(s) for s in smt_sigs]
+        + [hidden_smt_to_dict(s) for s in hidden_smts]
+        + [fill_smt_to_dict(s) for s in fill_smts]
+    )
+    if is_hist:
+        return sorted(current_ser, key=lambda s: s["time"], reverse=True)
+
+    _update_signal_log(current_ser, ref_time, is_hist=False)
+    return sorted(_signal_log, key=lambda s: s["time"], reverse=True)
 
 
 # ──────────────────────────────────────────────
@@ -661,6 +719,7 @@ def api_scan():
         "smt_signals":    [smt_to_dict(s) for s in smt_sigs],
         "hidden_smts":    [hidden_smt_to_dict(s) for s in hidden_smts],
         "fill_smts":      [fill_smt_to_dict(s) for s in fill_smts],
+        "active_signals": _get_active_signals(smt_sigs, hidden_smts, fill_smts, ref_time, is_hist),
         "recommendation": recommendation,
     })
 
