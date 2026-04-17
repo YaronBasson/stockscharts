@@ -44,15 +44,15 @@ POLYGON_API_KEY=...
 
 ## Web Dashboard Features
 
-- Dual Plotly candlestick charts (MNQ + MES) with synchronized zoom/pan
-- FVG rectangles drawn from gap formation candle (c3) to last candle — disappear when filled
+- Dual Plotly candlestick charts (MNQ + MES) with synchronized zoom/pan; panning left shows up to 7 days of history
+- FVG rectangles drawn from gap formation candle (c3) to last candle — only FVGs formed within the 3-day display window are shown (older ones filtered to avoid ghost bands)
 - SMT alert box: Regular, Hidden, Fill types with ref label (e.g. "swing high @15:30")
 - Fill SMT: highlights triggering FVG with bright border + shows gap range in alert box
 - Recommendation panel with trade plan table: Entry, TP1–TP4 (named levels + FVG edges), Stop (named level), Stop (configurable % from `.env`)
 - Quarters table (Q1–Q4 H/L for today)
 - Levels table (PDH/PDL, TDO, TWO, HOD/LOD, Q1–Q4 H/L, NYO)
 - Manual Telegram alert button (bypasses dedup, works in historical mode)
-- Auto-pause: scanning stops 23:00–14:00 IL (NYSE closed); manual ⏸/▶ button override
+- Auto-pause: scanning stops 23:00–14:00 IL (NYSE closed) and all weekend; manual ⏸/▶ button override; ⏸ PAUSED badge in topbar
 - Step buttons (◄/►) to move through historical data by one timeframe interval
 - Glossary modal for ICT acronyms
 - Chart lock/unlock: locked = all movements sync; unlocked = only modebar buttons sync

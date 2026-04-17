@@ -728,40 +728,68 @@ def detect_hidden_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
     cur_mnq_body_high = max(float(cur_mnq["open"]), float(cur_mnq["close"]))
     cur_mes_body_high = max(float(cur_mes["open"]), float(cur_mes["close"]))
 
+    def _already_broke_high(df_a, ref_time, ref_level):
+        """Return True if any candle strictly between ref_time and cur_time already had body_high >= ref_level."""
+        between = df_a[(df_a.index > ref_time) & (df_a.index < cur_time)]
+        if between.empty:
+            return False
+        return bool((between[["open", "close"]].max(axis=1) >= ref_level).any())
+
+    def _already_broke_low(df_a, ref_time, ref_level):
+        """Return True if any candle strictly between ref_time and cur_time already had body_low <= ref_level."""
+        between = df_a[(df_a.index > ref_time) & (df_a.index < cur_time)]
+        if between.empty:
+            return False
+        return bool((between[["open", "close"]].min(axis=1) <= ref_level).any())
+
     signals = []
 
+    # ── Bullish: MNQ body broke LOW, MES held ──
+    # Valid only if the reference body low was not already breached by intermediate candles
+    # (on either side — a stale level means the divergence is not fresh).
     if cur_mnq_body_low < ref_mnq_low and cur_mes_body_low >= ref_mes_low:
-        signals.append({
-            "type": "hidden_bullish_smt", "direction": "LONG 🟢",
-            "time": cur_time, "mnq_val": cur_mnq_body_low,
-            "mes_val": cur_mes_body_low, "ref_mnq": ref_mnq_low, "ref_mes": ref_mes_low,
-            "ref_mnq_time": mnq_low_ts, "ref_mes_time": mes_low_ts,
-            "detail": f"Hidden SMT: MNQ body broke low ({cur_mnq_body_low:.2f} < body low {ref_mnq_low:.2f} @{mnq_low_t}), MES body held"
-        })
+        if (not _already_broke_low(mnq_a, mnq_low_ts, ref_mnq_low) and
+                not _already_broke_low(mes_a, mes_low_ts, ref_mes_low)):
+            signals.append({
+                "type": "hidden_bullish_smt", "direction": "LONG 🟢",
+                "time": cur_time, "mnq_val": cur_mnq_body_low,
+                "mes_val": cur_mes_body_low, "ref_mnq": ref_mnq_low, "ref_mes": ref_mes_low,
+                "ref_mnq_time": mnq_low_ts, "ref_mes_time": mes_low_ts,
+                "detail": f"Hidden SMT: MNQ body broke low ({cur_mnq_body_low:.2f} < body low {ref_mnq_low:.2f} @{mnq_low_t}), MES body held"
+            })
+    # ── Bullish: MES body broke LOW, MNQ held ──
     if cur_mes_body_low < ref_mes_low and cur_mnq_body_low >= ref_mnq_low:
-        signals.append({
-            "type": "hidden_bullish_smt", "direction": "LONG 🟢",
-            "time": cur_time, "mnq_val": cur_mnq_body_low,
-            "mes_val": cur_mes_body_low, "ref_mnq": ref_mnq_low, "ref_mes": ref_mes_low,
-            "ref_mnq_time": mnq_low_ts, "ref_mes_time": mes_low_ts,
-            "detail": f"Hidden SMT: MES body broke low ({cur_mes_body_low:.2f} < body low {ref_mes_low:.2f} @{mes_low_t}), MNQ body held"
-        })
+        if (not _already_broke_low(mes_a, mes_low_ts, ref_mes_low) and
+                not _already_broke_low(mnq_a, mnq_low_ts, ref_mnq_low)):
+            signals.append({
+                "type": "hidden_bullish_smt", "direction": "LONG 🟢",
+                "time": cur_time, "mnq_val": cur_mnq_body_low,
+                "mes_val": cur_mes_body_low, "ref_mnq": ref_mnq_low, "ref_mes": ref_mes_low,
+                "ref_mnq_time": mnq_low_ts, "ref_mes_time": mes_low_ts,
+                "detail": f"Hidden SMT: MES body broke low ({cur_mes_body_low:.2f} < body low {ref_mes_low:.2f} @{mes_low_t}), MNQ body held"
+            })
+    # ── Bearish: MNQ body broke HIGH, MES held ──
     if cur_mnq_body_high > ref_mnq_high and cur_mes_body_high <= ref_mes_high:
-        signals.append({
-            "type": "hidden_bearish_smt", "direction": "SHORT 🔴",
-            "time": cur_time, "mnq_val": cur_mnq_body_high,
-            "mes_val": cur_mes_body_high, "ref_mnq": ref_mnq_high, "ref_mes": ref_mes_high,
-            "ref_mnq_time": mnq_high_ts, "ref_mes_time": mes_high_ts,
-            "detail": f"Hidden SMT: MNQ body broke high ({cur_mnq_body_high:.2f} > body high {ref_mnq_high:.2f} @{mnq_high_t}), MES body held"
-        })
+        if (not _already_broke_high(mnq_a, mnq_high_ts, ref_mnq_high) and
+                not _already_broke_high(mes_a, mes_high_ts, ref_mes_high)):
+            signals.append({
+                "type": "hidden_bearish_smt", "direction": "SHORT 🔴",
+                "time": cur_time, "mnq_val": cur_mnq_body_high,
+                "mes_val": cur_mes_body_high, "ref_mnq": ref_mnq_high, "ref_mes": ref_mes_high,
+                "ref_mnq_time": mnq_high_ts, "ref_mes_time": mes_high_ts,
+                "detail": f"Hidden SMT: MNQ body broke high ({cur_mnq_body_high:.2f} > body high {ref_mnq_high:.2f} @{mnq_high_t}), MES body held"
+            })
+    # ── Bearish: MES body broke HIGH, MNQ held ──
     if cur_mes_body_high > ref_mes_high and cur_mnq_body_high <= ref_mnq_high:
-        signals.append({
-            "type": "hidden_bearish_smt", "direction": "SHORT 🔴",
-            "time": cur_time, "mnq_val": cur_mnq_body_high,
-            "mes_val": cur_mes_body_high, "ref_mnq": ref_mnq_high, "ref_mes": ref_mes_high,
-            "ref_mnq_time": mnq_high_ts, "ref_mes_time": mes_high_ts,
-            "detail": f"Hidden SMT: MES body broke high ({cur_mes_body_high:.2f} > body high {ref_mes_high:.2f} @{mes_high_t}), MNQ body held"
-        })
+        if (not _already_broke_high(mes_a, mes_high_ts, ref_mes_high) and
+                not _already_broke_high(mnq_a, mnq_high_ts, ref_mnq_high)):
+            signals.append({
+                "type": "hidden_bearish_smt", "direction": "SHORT 🔴",
+                "time": cur_time, "mnq_val": cur_mnq_body_high,
+                "mes_val": cur_mes_body_high, "ref_mnq": ref_mnq_high, "ref_mes": ref_mes_high,
+                "ref_mnq_time": mnq_high_ts, "ref_mes_time": mes_high_ts,
+                "detail": f"Hidden SMT: MES body broke high ({cur_mes_body_high:.2f} > body high {ref_mes_high:.2f} @{mes_high_t}), MNQ body held"
+            })
 
     return signals
 

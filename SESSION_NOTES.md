@@ -918,3 +918,139 @@ Counts distinct dates that actually have candle data — only real trading days 
 | `ict_smt_agent.py` | `find_nearest_body_liquidity()` added; `detect_hidden_smt()` uses swing body lookup; `score_mnq_divergence()` added; `WEIGHTS` updated with `mnq_divergence`; `compute_recommendation()` wired; terminal factors line updated |
 | `web_app.py` | Display cutoff now counts trading days instead of calendar days |
 | `templates/index.html` | Y-axis sync bug fixed; `rangebreaks` weekend gap removed; MNQ Div factor bar added to recommendation panel |
+
+---
+
+## SESSION 8 — Completed: 2026-04-17
+
+### Overview
+Six fixes and improvements this session:
+1. Crosshair hover info broken by `rangebreaks` — fixed using Plotly's `p2c()` converter
+2. Hidden SMT false positives when reference level was already violated by intermediate candles
+3. FVG rectangles from outside the display window appearing as full-width bands
+4. Chart now sends all 7 days of candles so panning left reveals older history
+5. Telegram alerts extended to Hidden SMT and Fill SMT (previously only Regular SMT alerted)
+6. New LONG/SHORT trade alert with distinct format; 5-minute candle direction confirmation filter
+
+---
+
+### 1. Crosshair Hover Fix for `rangebreaks`
+
+**Problem:** After adding `rangebreaks: [{bounds:['sat','mon']}]`, the hover info bar below each chart showed the wrong candle. Hovering over Monday candles showed "04/07 19:00" (Friday close) instead of Monday data. Root cause: the mousemove handler calculated timestamp by linearly interpolating between `xaxis.range[0]` and `xaxis.range[1]`. With weekends removed from the pixel axis, a cursor at 70% of pixels mapped to a timestamp 70% through the full calendar range — landing in the weekend gap. `findClosestPoint` then returned the Friday candle as the nearest match.
+
+**Fix (`templates/index.html`):**
+```javascript
+// Before (broken with rangebreaks):
+const xStart = new Date(xRange[0]).getTime();
+const xEnd   = new Date(xRange[1]).getTime();
+const xMs    = xStart + (xInPl / plotW) * (xEnd - xStart);
+
+// After (uses Plotly's own axis converter, handles rangebreaks):
+const xMs = srcLayout.xaxis.p2c(xInPl);
+```
+`xaxis.p2c(pixelOffset)` is Plotly's internal "pixels to calendar" function, which maps pixel positions to timestamps while correctly skipping removed ranges.
+
+---
+
+### 2. Hidden SMT — Stale Reference Level Fix
+
+**Problem:** `detect_hidden_smt()` found a swing body high/low as reference but did not check whether intermediate candles (between the reference candle and the current candle) had already violated that level. If they had, the divergence wasn't fresh — any candle between them already "broke" the level. This caused false positive SHORT signals like "MNQ body broke high @05:00" when Q2 candles (07:00–13:00) had already exceeded that level.
+
+**Fix (`ict_smt_agent.py` — inside `detect_hidden_smt()`):**
+Two helper closures added:
+```python
+def _already_broke_high(df_a, ref_time, ref_level):
+    between = df_a[(df_a.index > ref_time) & (df_a.index < cur_time)]
+    if between.empty: return False
+    return bool((between[["open","close"]].max(axis=1) >= ref_level).any())
+
+def _already_broke_low(df_a, ref_time, ref_level):
+    between = df_a[(df_a.index > ref_time) & (df_a.index < cur_time)]
+    if between.empty: return False
+    return bool((between[["open","close"]].min(axis=1) <= ref_level).any())
+```
+All 4 signal conditions now gate on both the **sweeping** instrument's level being fresh AND the **holding** instrument's reference not having been violated by intermediate candles.
+
+---
+
+### 3. FVG Display Filter (no more ghost bands)
+
+**Problem:** `detect_fvg()` runs on 7 days of data (`SWING_LOOKBACK_DAYS`). Old unfilled FVGs with `start_time` before the 3-day display cutoff were included in the JSON response. Their `x0=start_time` was off-screen left, so they rendered as full-width horizontal bands with no visible origin — cluttering the chart.
+
+**Fix (`web_app.py` — `api_scan()`):**
+```python
+"fvgs": [fvg_to_dict(f) for f in mnq_fvgs if f["start_time"] >= display_cutoff],
+"fvgs": [fvg_to_dict(f) for f in mes_fvgs if f["start_time"] >= display_cutoff],
+```
+FVGs are still computed over 7 days for `detect_fill_smt()` detection — the filter only applies to what is sent to the chart for display.
+
+---
+
+### 4. Chart Sends All 7 Days of Candles
+
+**Problem:** The backend trimmed candles to 3 trading days before sending (`mnq_display = mnq_df[mnq_df.index >= display_cutoff]`). Panning left on the chart showed a blank area immediately.
+
+**Fix (`web_app.py`):**
+```python
+mnq_display = mnq_df   # full 7-day window
+mes_display = mes_df
+```
+All fetched candles are now sent to the frontend. FVG display is still filtered to 3 days (fix #3 above).
+
+---
+
+### 5. Telegram Alerts for Hidden SMT and Fill SMT
+
+**Problem:** `_send_web_smt_alerts()` only looped over `smt_sigs` (Regular SMT). Hidden SMT and Fill SMT detections never triggered automatic Telegram alerts.
+
+**Fix (`web_app.py`):**
+`_send_web_smt_alerts()` signature extended to accept all three lists. Three separate loops handle each type with distinct message headers:
+- Regular SMT: `🟢/🔴 Regular SMT — {direction} [WEB]` + MNQ/MES values + ref values
+- Hidden SMT: `🟢/🔴 Hidden SMT — {direction} [WEB]` + body values + body ref values
+- Fill SMT: `🟢/🔴 Fill SMT — {direction} [WEB]` + FVG instrument/direction/range
+
+Call site: `if not is_hist and (smt_sigs or hidden_smts or fill_smts):`
+
+---
+
+### 6. Trade Alert + 5-Minute Confirmation Filter
+
+#### New: LONG/SHORT recommendation alert (`web_app.py`)
+New function `_send_rec_alert(rec, mnq_levels, mes_levels, ref_time, mnq_fvgs, mes_fvgs)`:
+- Fires only when `recommendation.action` is `LONG` or `SHORT` (never on WAIT)
+- Dedup key: `"{action}_{scan_minute}"` — fires once per minute per direction
+- Clears old dedup entries when direction flips (LONG→SHORT or vice versa)
+- Clears all dedup when recommendation returns to WAIT
+- Visually distinct format with double emoji header:
+  ```
+  🚀🚀 TRADE ALERT — LONG (STRONG) 🚀🚀
+  ⏰ 17/04/2026 14:45 (Israel)  Q3 till 19:00
+  📈 Score: +0.680
+  ⚙️ 15m
+    ✅ SMT: bullish divergence
+    ✅ Liquidity: swept PDL
+  🟢 Trade Plan (MNQ) ...
+  ```
+
+#### New: 5-minute direction confirmation filter (`web_app.py`)
+New function `_check_5m_direction(direction, ref_time, source) -> (bool, str)`:
+- Fetches 1 day of 5m MNQ candles via `fetch_data("MNQ=F", "5m", ...)`
+- Looks at last 3 five-minute candles
+- SHORT confirmed: ≥ 2 of 3 bearish (close < open)
+- LONG confirmed: ≥ 2 of 3 bullish (close > open)
+- On fetch error: returns `(True, "")` — never suppresses due to data issue
+
+Applied inside `_send_web_smt_alerts()` before sending each signal:
+- If not confirmed → marked as `"suppressed"` in dedup dict (permanent, not retried)
+- If confirmed → alert fires; message includes `🕯 5m: 2/3 bearish candles ✅`
+- 5m data fetched once per scan and cached in local dict across all signal types
+
+---
+
+### Files Status
+
+| File | Status |
+|---|---|
+| `ict_smt_agent.py` | Hidden SMT stale-reference guard (`_already_broke_high/low`) added |
+| `web_app.py` | FVG display filter; full candle history sent; hidden/fill SMT alerts; `_send_rec_alert()`; `_check_5m_direction()` 5m confirmation filter |
+| `templates/index.html` | Crosshair `p2c()` fix for `rangebreaks` hover accuracy |

@@ -353,54 +353,211 @@ def _build_trade_plan_str(action: str, mnq_levels: dict, mnq_fvgs: list, mes_fvg
     return "\n".join(lines)
 
 
-def _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=None, mnq_fvgs=None, mes_fvgs=None):
-    """Send Telegram for any SMT signals not already alerted this candle."""
+def _check_5m_direction(direction: str, ref_time, source: str) -> tuple[bool, str]:
+    """
+    Fetch the last 5-minute candles for MNQ and check if recent price movement
+    confirms the signal direction.
+    Rules (last 3 five-minute candles):
+      SHORT confirmed → at least 2 of 3 are bearish (close < open)
+      LONG  confirmed → at least 2 of 3 are bullish  (close > open)
+    Returns (confirmed: bool, reason: str).
+    On fetch failure returns (True, "") — never suppress due to data error.
+    """
+    try:
+        df = fetch_data("MNQ=F", "5m", days=1, end_dt=ref_time, source=source)
+        if df is None or len(df) < 3:
+            return True, ""
+        last3 = df.iloc[-3:]
+        bearish = int((last3["close"] < last3["open"]).sum())
+        bullish = int((last3["close"] > last3["open"]).sum())
+        if direction == "SHORT":
+            ok = bearish >= 2
+            desc = f"5m: {bearish}/3 bearish candles {'✅' if ok else '❌'}"
+        else:
+            ok = bullish >= 2
+            desc = f"5m: {bullish}/3 bullish candles {'✅' if ok else '❌'}"
+        return ok, desc
+    except Exception:
+        return True, ""   # don't suppress on error
+
+
+def _send_web_smt_alerts(smt_sigs, hidden_smts, fill_smts, mnq_levels, mes_levels, ref_time, rec=None, mnq_fvgs=None, mes_fvgs=None, source="yfinance"):
+    """Send Telegram for any new SMT / Hidden SMT / Fill SMT signals not already alerted this candle."""
     global _last_web_smt
     import html as html_lib
 
+    q_info = get_quarter(ref_time)
+    q_tag  = ""
+    if q_info:
+        q_num, qs, qe = q_info
+        q_end = quarter_end_dt(ref_time, qe)
+        q_tag = f"  |  Q{q_num} till {q_end.strftime('%H:%M')}"
+
+    rec_str = ""
+    if rec:
+        r_action  = rec.get("action", "WAIT")
+        strength  = rec.get("strength", "")
+        score     = rec.get("score", 0)
+        reasons   = rec.get("reasons", [])
+        rec_emoji = "🟢" if r_action == "LONG" else ("🔴" if r_action == "SHORT" else "⏸")
+        rec_str   = f"\n{rec_emoji} <b>Recommendation: {r_action} ({strength})</b>  score: {score:+.3f}"
+        if reasons:
+            rec_str += "\n📋 " + "\n📋 ".join(html_lib.escape(r) for r in reasons)
+
+    plan_str = _build_trade_plan_str(
+        (rec or {}).get("action", "WAIT"),
+        mnq_levels, mnq_fvgs or [], mes_fvgs or []
+    )
+
+    # Fetch 5m data once — shared confirmation check for all signal types.
+    # Cache is hit on subsequent scans within 55s so no extra API cost.
+    _5m_cache: dict = {}
+
+    def _5m_confirmed(direction: str) -> tuple[bool, str]:
+        key = "LONG" if "LONG" in direction else "SHORT"
+        if key not in _5m_cache:
+            _5m_cache[key] = _check_5m_direction(key, ref_time, source)
+        return _5m_cache[key]
+
+    # ── Regular SMT ───────────────────────────────────────────────
     for sig in smt_sigs:
         sig_key = f"{sig['type']}_{sig['time'].strftime('%Y%m%d%H%M')}"
         if _last_web_smt.get(sig_key):
+            continue
+
+        confirmed, conf_desc = _5m_confirmed(sig["direction"])
+        if not confirmed:
+            # Store as suppressed so we don't re-check the same candle forever
+            _last_web_smt[sig_key] = "suppressed"
             continue
         _last_web_smt[sig_key] = True
 
         is_long = sig["direction"].startswith("LONG")
         emoji   = "🟢" if is_long else "🔴"
-
-        q_info = get_quarter(ref_time)
-        q_tag  = ""
-        if q_info:
-            q_num, qs, qe = q_info
-            q_end = quarter_end_dt(ref_time, qe)
-            q_tag = f"  |  Q{q_num} till {q_end.strftime('%H:%M')}"
-
-        rec_str = ""
-        if rec:
-            r_action   = rec.get("action", "WAIT")
-            strength   = rec.get("strength", "")
-            score      = rec.get("score", 0)
-            reasons    = rec.get("reasons", [])
-            rec_emoji  = "🟢" if r_action == "LONG" else ("🔴" if r_action == "SHORT" else "⏸")
-            rec_str    = f"\n{rec_emoji} <b>Recommendation: {r_action} ({strength})</b>  score: {score:+.3f}"
-            if reasons:
-                rec_str += "\n📋 " + "\n📋 ".join(html_lib.escape(r) for r in reasons)
-
-        plan_str = _build_trade_plan_str(
-            (rec or {}).get("action", "WAIT"),
-            mnq_levels, mnq_fvgs or [], mes_fvgs or []
-        )
-
         tg_text = (
-            f"{emoji} <b>SMT Signal — {sig['direction']} [WEB]</b>\n"
+            f"{emoji} <b>Regular SMT — {sig['direction']} [WEB]</b>\n"
             f"⏰ {sig['time'].strftime('%d/%m/%Y %H:%M')} (Israel)\n"
             f"📊 MNQ: <b>{sig['mnq_val']:.2f}</b>  (ref: {sig['ref_mnq']:.2f})\n"
             f"📊 MES: <b>{sig['mes_val']:.2f}</b>  (ref: {sig['ref_mes']:.2f})\n"
             f"💡 {html_lib.escape(sig['detail'])}\n"
+            f"🕯 {conf_desc}\n"
             f"⚙️ Timeframe: {TIMEFRAME}{q_tag}"
-            f"{rec_str}"
-            f"{plan_str}"
+            f"{rec_str}{plan_str}"
         )
         send_telegram(tg_text)
+
+    # ── Hidden SMT ────────────────────────────────────────────────
+    for sig in hidden_smts:
+        sig_key = f"{sig['type']}_{sig['time'].strftime('%Y%m%d%H%M')}"
+        if _last_web_smt.get(sig_key):
+            continue
+
+        confirmed, conf_desc = _5m_confirmed(sig["direction"])
+        if not confirmed:
+            _last_web_smt[sig_key] = "suppressed"
+            continue
+        _last_web_smt[sig_key] = True
+
+        is_long = sig["direction"].startswith("LONG")
+        emoji   = "🟢" if is_long else "🔴"
+        tg_text = (
+            f"{emoji} <b>Hidden SMT — {sig['direction']} [WEB]</b>\n"
+            f"⏰ {sig['time'].strftime('%d/%m/%Y %H:%M')} (Israel)\n"
+            f"📊 MNQ body: <b>{sig['mnq_val']:.2f}</b>  (ref: {sig['ref_mnq']:.2f})\n"
+            f"📊 MES body: <b>{sig['mes_val']:.2f}</b>  (ref: {sig['ref_mes']:.2f})\n"
+            f"💡 {html_lib.escape(sig['detail'])}\n"
+            f"🕯 {conf_desc}\n"
+            f"⚙️ Timeframe: {TIMEFRAME}{q_tag}"
+            f"{rec_str}{plan_str}"
+        )
+        send_telegram(tg_text)
+
+    # ── Fill SMT ──────────────────────────────────────────────────
+    for sig in fill_smts:
+        sig_key = f"{sig['type']}_{sig['time'].strftime('%Y%m%d%H%M')}"
+        if _last_web_smt.get(sig_key):
+            continue
+
+        confirmed, conf_desc = _5m_confirmed(sig["direction"])
+        if not confirmed:
+            _last_web_smt[sig_key] = "suppressed"
+            continue
+        _last_web_smt[sig_key] = True
+
+        is_long = sig["direction"].startswith("LONG")
+        emoji   = "🟢" if is_long else "🔴"
+        fvg_line = ""
+        if sig.get("fvg_bottom") is not None:
+            fvg_dir = "▲ Bullish" if sig.get("fvg_type") == "bullish" else "▼ Bearish"
+            fvg_line = (f"\n▣ FVG ({sig.get('fvg_instrument','')}): "
+                        f"{fvg_dir}  {sig['fvg_bottom']:.2f} – {sig['fvg_top']:.2f}")
+        tg_text = (
+            f"{emoji} <b>Fill SMT — {sig['direction']} [WEB]</b>\n"
+            f"⏰ {sig['time'].strftime('%d/%m/%Y %H:%M')} (Israel)\n"
+            f"{fvg_line}\n"
+            f"💡 {html_lib.escape(sig['detail'])}\n"
+            f"🕯 {conf_desc}\n"
+            f"⚙️ Timeframe: {TIMEFRAME}{q_tag}"
+            f"{rec_str}{plan_str}"
+        )
+        send_telegram(tg_text)
+
+
+def _send_rec_alert(rec, mnq_levels, mes_levels, ref_time, mnq_fvgs=None, mes_fvgs=None):
+    """
+    Fire a trade-action Telegram alert when the recommendation is LONG or SHORT.
+    Deduped per candle-minute so it fires once per new recommendation, not every scan.
+    Clears on direction flip (LONG → SHORT or vice versa).
+    """
+    global _last_rec_alert
+    import html as html_lib
+
+    if not rec:
+        return
+    action = rec.get("action", "WAIT")
+    if action == "WAIT":
+        # Clear dedup so the next LONG/SHORT fires fresh
+        _last_rec_alert.clear()
+        return
+
+    # Dedup key: action + candle-minute
+    rec_key = f"{action}_{ref_time.strftime('%Y%m%d%H%M')}"
+    if _last_rec_alert.get(rec_key):
+        return
+
+    # Direction flip: clear old dedup so we don't suppress the new direction
+    opposite = "SHORT" if action == "LONG" else "LONG"
+    _last_rec_alert = {k: v for k, v in _last_rec_alert.items() if not k.startswith(opposite)}
+    _last_rec_alert[rec_key] = True
+
+    is_long  = action == "LONG"
+    emoji    = "🚀" if is_long else "🔻"
+    strength = rec.get("strength", "")
+    score    = rec.get("score", 0)
+    reasons  = rec.get("reasons", [])
+
+    q_info = get_quarter(ref_time)
+    q_tag  = ""
+    if q_info:
+        q_num, qs, qe = q_info
+        q_end = quarter_end_dt(ref_time, qe)
+        q_tag = f"Q{q_num} till {q_end.strftime('%H:%M')}"
+
+    plan_str = _build_trade_plan_str(action, mnq_levels, mnq_fvgs or [], mes_fvgs or [])
+
+    reasons_str = ""
+    if reasons:
+        reasons_str = "\n" + "\n".join(f"  {'✅' if is_long else '❌'} {html_lib.escape(r)}" for r in reasons)
+
+    tg_text = (
+        f"{emoji}{emoji} <b>TRADE ALERT — {action} ({strength})</b> {emoji}{emoji}\n"
+        f"⏰ {ref_time.strftime('%d/%m/%Y %H:%M')} (Israel)  {q_tag}\n"
+        f"📈 Score: <b>{score:+.3f}</b>\n"
+        f"⚙️ Timeframe: {TIMEFRAME}"
+        f"{reasons_str}"
+        f"{plan_str}"
+    )
+    send_telegram(tg_text)
 
 
 
@@ -620,9 +777,13 @@ def api_scan():
         "rec":         recommendation,
     }
 
-    # ── Telegram: SMT alerts only, with recommendation context ──
-    if not is_hist and smt_sigs:
-        _send_web_smt_alerts(smt_sigs, mnq_levels, mes_levels, ref_time, rec=recommendation, mnq_fvgs=mnq_fvgs, mes_fvgs=mes_fvgs)
+    # ── Telegram: SMT signal alerts ──────────────────────────────
+    if not is_hist and (smt_sigs or hidden_smts or fill_smts):
+        _send_web_smt_alerts(smt_sigs, hidden_smts, fill_smts, mnq_levels, mes_levels, ref_time, rec=recommendation, mnq_fvgs=mnq_fvgs, mes_fvgs=mes_fvgs, source=ui_source)
+
+    # ── Telegram: LONG / SHORT recommendation alert ───────────────
+    if not is_hist:
+        _send_rec_alert(recommendation, mnq_levels, mes_levels, ref_time, mnq_fvgs=mnq_fvgs, mes_fvgs=mes_fvgs)
 
     # ── Current quarter ───────────────────────
     q_info  = get_quarter(ref_time)
@@ -688,8 +849,8 @@ def api_scan():
         display_cutoff = trading_dates[-LOOKBACK_DAYS].to_pydatetime().replace(tzinfo=ISRAEL_TZ)
     else:
         display_cutoff = trading_dates[0].to_pydatetime().replace(tzinfo=ISRAEL_TZ) if trading_dates else ref_time - timedelta(days=LOOKBACK_DAYS)
-    mnq_display = mnq_df[mnq_df.index >= display_cutoff]
-    mes_display = mes_df[mes_df.index >= display_cutoff]
+    mnq_display = mnq_df
+    mes_display = mes_df
 
     skip = {"CURRENT"}
     return jsonify({
@@ -707,14 +868,14 @@ def api_scan():
             "current": mnq_levels.get("CURRENT", 0),
             "candles": df_to_candles(mnq_display),
             "levels":  {k: v for k, v in mnq_levels.items() if k not in skip},
-            "fvgs":    [fvg_to_dict(f) for f in mnq_fvgs],
+            "fvgs":    [fvg_to_dict(f) for f in mnq_fvgs if f["start_time"] >= display_cutoff],
         },
         "mes": {
             "ticker":  "MES",
             "current": mes_levels.get("CURRENT", 0),
             "candles": df_to_candles(mes_display),
             "levels":  {k: v for k, v in mes_levels.items() if k not in skip},
-            "fvgs":    [fvg_to_dict(f) for f in mes_fvgs],
+            "fvgs":    [fvg_to_dict(f) for f in mes_fvgs if f["start_time"] >= display_cutoff],
         },
         "smt_signals":    [smt_to_dict(s) for s in smt_sigs],
         "hidden_smts":    [hidden_smt_to_dict(s) for s in hidden_smts],
