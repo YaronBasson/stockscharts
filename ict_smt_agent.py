@@ -983,19 +983,11 @@ def score_quarters(ref_time) -> float:
     return round(mult, 2)
 
 
-def score_tdo_two(current, tdo, two, mnq_levels=None, smt_score=0.0) -> tuple:
+def score_tdo_two(current, tdo, two) -> tuple:
     """
     Score based on TDO (daily bias) and TWO (weekly bias).
+    Returns (score: float, reasons: list).
     Below TDO/TWO = discount = LONG (+). Above = premium = SHORT (-).
-
-    Context-aware adjustment:
-    TDO/TWO mark the discount/premium zone, but they are NOT the final target —
-    the actual target is the nearest liquidity level in the direction of the move.
-    If an SMT signal says LONG but price has already crossed into premium,
-    the move may still be valid if there is upper liquidity (PDH/HOD/PWH)
-    above current price that hasn't been reached yet.
-    In that case we return neutral (0) instead of penalising the LONG.
-    Same logic applies in reverse for SHORT moves crossing into discount.
     """
     sub = []
     reasons = []
@@ -1024,38 +1016,6 @@ def score_tdo_two(current, tdo, two, mnq_levels=None, smt_score=0.0) -> tuple:
         return 0.0, ["Conflict: daily and weekly bias oppose each other"]
 
     score = max(-1.0, min(1.0, sum(sub) / len(sub)))
-
-    # ── Context-aware override ────────────────────────────────────
-    # If SMT momentum opposes the TDO/TWO bias, check whether price still
-    # has room to run to the nearest liquidity target in the SMT direction.
-    # If it does, the TDO/TWO reading is premature — return neutral.
-    if mnq_levels and smt_score != 0.0:
-        high_names = ("PDH", "PWH", "HOD")
-        low_names  = ("PDL", "PWL", "LOD")
-
-        # LONG SMT but price in premium (score < 0) → check for upper target
-        if smt_score > 0 and score < 0:
-            # Find nearest upper liquidity still above current price
-            above = [(n, mnq_levels[n]) for n in high_names
-                     if mnq_levels.get(n) and mnq_levels[n] > current]
-            if above:
-                nearest_name, nearest_val = min(above, key=lambda x: x[1])
-                return 0.0, [
-                    f"In premium (above TDO/TWO) but LONG in progress — "
-                    f"targeting {nearest_name} ({nearest_val:.2f}) above; TDO/TWO not final target"
-                ]
-
-        # SHORT SMT but price in discount (score > 0) → check for lower target
-        if smt_score < 0 and score > 0:
-            below = [(n, mnq_levels[n]) for n in low_names
-                     if mnq_levels.get(n) and mnq_levels[n] < current]
-            if below:
-                nearest_name, nearest_val = max(below, key=lambda x: x[1])
-                return 0.0, [
-                    f"In discount (below TDO/TWO) but SHORT in progress — "
-                    f"targeting {nearest_name} ({nearest_val:.2f}) below; TDO/TWO not final target"
-                ]
-
     return score, reasons
 
 
@@ -1135,7 +1095,7 @@ def compute_recommendation(mnq_df, mes_df, mnq_levels, mes_levels,
                                      mes_df, mes_levels, mes_fvgs)
     s_smt, r_smt   = score_smt(regular_smts, hidden_smts, fill_smts, ref_time)
     q_mult         = score_quarters(ref_time)
-    s_bias, r_bias = score_tdo_two(current, tdo, two, mnq_levels=mnq_levels, smt_score=s_smt)
+    s_bias, r_bias = score_tdo_two(current, tdo, two)
     s_div,  r_div  = score_mnq_divergence(mnq_levels, mes_levels)
 
     # Normalize weights (exclude quarters — it's a multiplier)
