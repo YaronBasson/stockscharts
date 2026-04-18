@@ -95,7 +95,7 @@ Two main files + one template:
 2. `get_external_levels(df, ref_time)` — PDH/PDL, TDO, TWO, HOD/LOD, PWH/PWL, NYO, Q1–Q4 H/L
 3. `detect_fvg()` — active (unfilled) Fair Value Gaps; each has `time` (c2) and `start_time` (c3, for chart drawing)
 4. `detect_smt()` — Regular SMT: uses `find_nearest_liquidity()` for swing high/low reference (falls back to rolling window); signals include `ref_mnq_label` / `ref_mes_label` (e.g. "swing high @15:30" or "rolling high @14:45")
-5. `detect_hidden_smt()` — same but uses candle bodies (open/close), not wicks; reference found via `find_nearest_body_liquidity()` (3-day swing lookup), rolling window fallback
+5. `detect_hidden_smt()` — same but uses candle bodies (open/close), not wicks; reference found via `find_nearest_body_liquidity()` (3-day swing lookup), rolling window fallback; guards against stale references — any intermediate candle between the reference and current that already violated the level suppresses the signal
 6. `detect_fill_smt()` — divergence in how each instrument interacts with its FVG zone
 7. `compute_recommendation()` — 4-factor weighted score → LONG/SHORT/WAIT with strength (liquidity + smt + tdo_two + mnq_divergence, each ×0.25, multiplied by quarter confidence)
 
@@ -116,14 +116,18 @@ Two main files + one template:
 
 ### `web_app.py`
 - Flask app on `127.0.0.1:8080`, `debug=False`
-- `GET /api/scan` — full analysis; returns candles, levels, signals, recommendation, `stop_loss_pct`
-  - Pause guard: returns `{paused, reason, resume_at}` during 23:00–14:00 IL in live mode
+- `GET /api/scan` — full analysis; returns candles (full 7-day window), levels, signals, recommendation, `stop_loss_pct`
+  - Pause guard: returns `{paused, reason, resume_at}` during 23:00–14:00 IL or on weekends in live mode
 - `POST /api/pause` — toggle/set pause state; body `{action: "pause"|"resume"|"toggle"|"auto"}`
 - `POST /api/alert` — manual Telegram send from `_last_scan_ctx`
-- Auto-pause constants: `AUTO_PAUSE_START=23`, `AUTO_PAUSE_END=14`
+- Auto-pause constants: `AUTO_PAUSE_START=23`, `AUTO_PAUSE_END=14`; also pauses on weekends (`weekday() >= 5`)
 - Twelve Data credit tracking: `TD_CREDITS_PER_SCAN=9`, `TD_DAILY_LIMIT=800`
-- Display cutoff uses actual trading days in data (not calendar days) — `LOOKBACK_DAYS=3` on Monday shows Mon+Fri+Thu, not Mon+weekend+Fri
+- FVGs filtered before sending to chart: only `f["start_time"] >= display_cutoff` sent (avoids ghost full-width bands from old unfilled gaps)
+- Display cutoff uses actual trading days in data (not calendar days) — `LOOKBACK_DAYS=3` on Monday shows Mon+Fri+Thu
 - `_build_trade_plan_str(action, mnq_levels, mnq_fvgs, mes_fvgs)` — builds TP1–TP4 candidate pool from named levels + FVG edges, picks stop (nearest named level on opposite side), returns Telegram HTML string including `🛑 Stop (level)` and `⛔ Stop (X%)`
+- `_send_web_smt_alerts(smt_sigs, hidden_smts, fill_smts, ...)` — sends Telegram for Regular, Hidden, and Fill SMT signals; each type has distinct message format; guarded by 5m direction confirmation
+- `_check_5m_direction(direction, ref_time, source)` — fetches last 5m MNQ candles; confirms ≥2 of last 3 candles match signal direction before allowing alert; returns `(bool, desc)`; suppresses alert permanently for that candle on failure; defaults True on fetch error
+- `_send_rec_alert(rec, ...)` — fires a "🚀🚀 TRADE ALERT" Telegram when recommendation is LONG/SHORT; deduped per scan-minute; distinct format from SMT alerts; clears on direction flip or WAIT
 
 ### `templates/index.html`
 - Bootstrap 5 + Plotly.js
@@ -133,5 +137,6 @@ Two main files + one template:
 - Hidden SMT: diagonal orange line on both charts connecting reference body level → current body level (shows divergence: one line goes down, other stays flat/up)
 - Fill SMT highlighted FVG: brighter fill + dotted border on the triggering instrument's chart
 - `rangebreaks: [{ bounds: ['sat','mon'] }]` on xaxis — hides weekend gaps; candles jump Friday → Monday with no empty space
+- Crosshair hover: uses `srcLayout.xaxis.p2c(xInPl)` to convert pixel position to timestamp — correctly handles `rangebreaks` (replacing broken linear interpolation that mapped into weekend gaps)
 - Y-axis sync: when mirroring X-only scroll, other chart's Y axis is left untouched (was incorrectly reset to autorange)
 - Recommendation panel: 5 factor bars — Liquidity, SMT, TDO/TWO, MNQ Div, Quarter ×
