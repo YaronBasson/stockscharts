@@ -682,15 +682,18 @@ def api_alert():
 
 @app.route("/api/scan")
 def api_scan():
-    # Honour pause state only in live mode (date= param means historical)
-    if not request.args.get("date") and _is_paused():
+    date_str    = request.args.get("date", "")
+    # Auto-pause (weekend / overnight) in live mode: still scan and show charts
+    # but suppress Telegram alerts.  Manual pause returns early with no data
+    # (user explicitly paused — no scan needed).
+    if not date_str and _pause_manual is True:
         return jsonify({
             "paused":    True,
-            "reason":    _pause_reason(),
-            "resume_at": f"{AUTO_PAUSE_END:02d}:00 IL",
+            "reason":    "manual",
+            "resume_at": _resume_at_str(),
         })
+    is_live_paused = (not date_str) and _auto_paused()
 
-    date_str    = request.args.get("date", "")
     hour        = int(request.args.get("hour", 15))
     minute      = int(request.args.get("minute", 0))
     ui_tf       = request.args.get("tf", "").strip()
@@ -778,11 +781,12 @@ def api_scan():
     }
 
     # ── Telegram: SMT signal alerts ──────────────────────────────
-    if not is_hist and (smt_sigs or hidden_smts or fill_smts):
+    # Suppress during auto-pause (weekend/overnight) — market is closed.
+    if not is_hist and not is_live_paused and (smt_sigs or hidden_smts or fill_smts):
         _send_web_smt_alerts(smt_sigs, hidden_smts, fill_smts, mnq_levels, mes_levels, ref_time, rec=recommendation, mnq_fvgs=mnq_fvgs, mes_fvgs=mes_fvgs, source=ui_source)
 
     # ── Telegram: LONG / SHORT recommendation alert ───────────────
-    if not is_hist:
+    if not is_hist and not is_live_paused:
         _send_rec_alert(recommendation, mnq_levels, mes_levels, ref_time, mnq_fvgs=mnq_fvgs, mes_fvgs=mes_fvgs)
 
     # ── Current quarter ───────────────────────
@@ -861,6 +865,9 @@ def api_scan():
         "source":       ui_source,
         "twelvedata":   td_info,
         "is_historical": is_hist,
+        "paused":       is_live_paused,
+        "reason":       _pause_reason() if is_live_paused else "",
+        "resume_at":    _resume_at_str() if is_live_paused else "",
         "quarter":      quarter,
         "quarters_today": quarters_today,
         "mnq": {

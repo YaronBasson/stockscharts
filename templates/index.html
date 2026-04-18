@@ -1477,9 +1477,16 @@ async function loadData() {
   try {
     const res = await fetch('/api/scan?' + params.toString());
     const data = await res.json();
-    if (data.paused) { handlePaused(data); return; }
     if (!res.ok) { setStatus(data.error || 'Error', true); return; }
-    setPausedUI(false);
+    // Manual pause: server returns no chart data — show banner only.
+    // Auto-pause (weekend/overnight): server returns chart data + paused:true —
+    // show charts AND the banner so user can see Friday's (or last-session) data.
+    if (data.paused && !data.mnq) { handlePaused(data); return; }
+    if (data.paused) {
+      setPausedUI(true, data.reason, data.resume_at);
+    } else {
+      setPausedUI(false);
+    }
     render(data);
     // Staleness: how old is the last candle?
     if (data.last_candle) {
