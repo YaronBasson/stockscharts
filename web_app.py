@@ -44,7 +44,8 @@ _load_env()
 
 from ict_smt_agent import (
     fetch_data, get_external_levels, detect_fvg, detect_smt,
-    detect_hidden_smt, detect_fill_smt, compute_recommendation,
+    detect_hidden_smt, detect_fill_smt, detect_time_spells, compute_recommendation,
+    compute_checklist,
     get_quarter, quarter_range_str, quarter_end_dt, auto_timeframe,
     nearest_liquidity, send_telegram,
     ISRAEL_TZ, QUARTERS, TIMEFRAME, LOOKBACK_DAYS, SWING_LOOKBACK_DAYS, TIMEFRAME_MAX_DAYS,
@@ -264,6 +265,16 @@ def fill_smt_to_dict(s):
         "fvg_top":         s.get("fvg_top"),
         "fvg_type":        s.get("fvg_type"),
         "fvg_start_time":  s["fvg_start_time"].isoformat() if s.get("fvg_start_time") else None,
+    }
+
+
+def time_spell_zone_to_dict(z):
+    return {
+        "level":       round(z["level"], 2),
+        "candle_time": z["candle_time"].isoformat(),
+        "quarter":     z["quarter"],
+        "weekday":     z["weekday"],
+        "match_type":  z["match_type"],
     }
 
 
@@ -756,9 +767,18 @@ def api_scan():
     mes_levels  = get_external_levels(mes_df, ref_time=ref_time)
     mnq_fvgs    = detect_fvg(mnq_df)
     mes_fvgs    = detect_fvg(mes_df)
-    smt_sigs    = detect_smt(mnq_df, mes_df)
-    hidden_smts = detect_hidden_smt(mnq_df, mes_df)
-    fill_smts   = detect_fill_smt(mnq_df, mes_df, mnq_fvgs, mes_fvgs)
+    smt_sigs      = detect_smt(mnq_df, mes_df)
+    hidden_smts   = detect_hidden_smt(mnq_df, mes_df)
+    fill_smts     = detect_fill_smt(mnq_df, mes_df, mnq_fvgs, mes_fvgs)
+    mnq_ts        = detect_time_spells(mnq_df, ref_time)
+    mes_ts        = detect_time_spells(mes_df, ref_time)
+
+    checklist = compute_checklist(
+        mnq_df, mes_df, mnq_levels, mes_levels,
+        mnq_fvgs, mes_fvgs,
+        smt_sigs, hidden_smts, fill_smts,
+        mnq_ts,
+    )
 
     recommendation = compute_recommendation(
         mnq_df, mes_df, mnq_levels, mes_levels,
@@ -876,6 +896,10 @@ def api_scan():
             "candles": df_to_candles(mnq_display),
             "levels":  {k: v for k, v in mnq_levels.items() if k not in skip},
             "fvgs":    [fvg_to_dict(f) for f in mnq_fvgs if f["start_time"] >= display_cutoff],
+            "time_spells": {
+                "premium":  [time_spell_zone_to_dict(z) for z in mnq_ts["premium"][:5]],
+                "discount": [time_spell_zone_to_dict(z) for z in mnq_ts["discount"][:5]],
+            },
         },
         "mes": {
             "ticker":  "MES",
@@ -883,12 +907,17 @@ def api_scan():
             "candles": df_to_candles(mes_display),
             "levels":  {k: v for k, v in mes_levels.items() if k not in skip},
             "fvgs":    [fvg_to_dict(f) for f in mes_fvgs if f["start_time"] >= display_cutoff],
+            "time_spells": {
+                "premium":  [time_spell_zone_to_dict(z) for z in mes_ts["premium"][:5]],
+                "discount": [time_spell_zone_to_dict(z) for z in mes_ts["discount"][:5]],
+            },
         },
         "smt_signals":    [smt_to_dict(s) for s in smt_sigs],
         "hidden_smts":    [hidden_smt_to_dict(s) for s in hidden_smts],
         "fill_smts":      [fill_smt_to_dict(s) for s in fill_smts],
         "active_signals": _get_active_signals(smt_sigs, hidden_smts, fill_smts, ref_time, is_hist),
         "recommendation": recommendation,
+        "checklist":      checklist,
     })
 
 

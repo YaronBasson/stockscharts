@@ -855,6 +855,132 @@ def detect_fill_smt(mnq: pd.DataFrame, mes: pd.DataFrame,
 
 
 # ══════════════════════════════════════════════
+#  TIME SPELLS  (כישופי זמן)
+# ══════════════════════════════════════════════
+
+# Quarter family: odd↔odd (Q1↔Q3), even↔even (Q2↔Q4)
+_TS_QUARTER_FAMILIES: dict = {1: (1, 3), 2: (2, 4), 3: (3, 1), 4: (4, 2)}
+# Weekday family (0=Mon,1=Tue,2=Wed,3=Thu,4=Fri): Mon↔Wed, Tue↔Thu, Fri↔Fri
+_TS_DAY_FAMILIES:     dict = {0: (0, 2), 1: (1, 3), 2: (2, 0), 3: (3, 1), 4: (4,)}
+_TS_DAY_NAMES = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri"}
+
+
+def _ts_quarter(ts) -> int | None:
+    """Return quarter (1-4) for a timestamp, or None if in the 00:00-01:00 gap."""
+    h = ts.hour
+    if  1 <= h <  7: return 1
+    if  7 <= h < 13: return 2
+    if 13 <= h < 19: return 3
+    if h >= 19:      return 4
+    return None   # 00:00-01:00 gap
+
+
+def detect_time_spells(df: pd.DataFrame, ref_time=None) -> dict:
+    """
+    Time Spells (כישופי זמן): find historical candle wicks from matching
+    quarter/day-of-week sessions that price is likely to seek before reversing.
+
+    Matching rules (from ICT Time-Spells theory):
+      - Quarter family: odd quarters pair with odd (Q1↔Q3), even with even (Q2↔Q4).
+        A candle in the current quarter can also reference a family-quarter candle
+        from the SAME day (intra-day session: e.g. Q3 candles look at Q1 of today).
+      - Day family (cross-day): Mon↔Wed, Tue↔Thu, Fri↔Fri only.
+
+    For each matching historical candle whose BODY is cleanly above/below current price:
+      - Body above price → lower wick (low)  = premium / potential SHORT zone
+      - Body below price → upper wick (high) = discount / potential LONG zone
+
+    Returns:
+      {
+        'premium':  [{'level', 'candle_time', 'quarter', 'weekday', 'match_type'}, ...],
+        'discount': [{'level', 'candle_time', 'quarter', 'weekday', 'match_type'}, ...],
+      }
+      Both lists are sorted nearest-to-current-price first, deduplicated.
+    """
+    if df is None or df.empty:
+        return {"premium": [], "discount": []}
+
+    if ref_time is None:
+        ref_time = datetime.now(ISRAEL_TZ)
+
+    current_price = float(df["close"].iloc[-1])
+    cur_q   = _ts_quarter(ref_time)
+    cur_dow = ref_time.weekday()           # 0=Mon … 4=Fri
+    cur_date = ref_time.date()
+
+    if cur_q is None or cur_dow > 4:      # gap hour or weekend
+        return {"premium": [], "discount": []}
+
+    valid_quarters = _TS_QUARTER_FAMILIES.get(cur_q, (cur_q,))
+    valid_days     = _TS_DAY_FAMILIES.get(cur_dow, (cur_dow,))
+
+    premium_zones  = []   # SHORT zones: candle body above price
+    discount_zones = []   # LONG  zones: candle body below price
+
+    for ts, row in df.iloc[:-1].iterrows():
+        q   = _ts_quarter(ts)
+        dow = ts.weekday()
+        if q is None or dow > 4:
+            continue
+
+        # Quarter must be in the matching family
+        if q not in valid_quarters:
+            continue
+
+        is_same_day     = (ts.date() == cur_date)
+        is_same_quarter = (q == cur_q)
+
+        if is_same_day:
+            # Intra-day session matching: allowed only for the family quarter
+            # (same quarter same day = current session itself → skip)
+            if is_same_quarter:
+                continue
+            match_type = "same-day family"
+        else:
+            # Cross-day: day-of-week must also be in the matching family
+            if dow not in valid_days:
+                continue
+            match_type = "same-Q" if is_same_quarter else "family-Q"
+
+        body_low  = min(float(row["open"]), float(row["close"]))
+        body_high = max(float(row["open"]), float(row["close"]))
+        wick_low  = float(row["low"])
+        wick_high = float(row["high"])
+
+        entry = {
+            "candle_time": ts,
+            "quarter":     q,
+            "weekday":     _TS_DAY_NAMES.get(dow, str(dow)),
+            "match_type":  match_type,
+        }
+
+        if body_low > current_price:
+            # Candle body above price → lower wick = premium (SHORT zone)
+            premium_zones.append({**entry, "level": wick_low})
+        elif body_high < current_price:
+            # Candle body below price → upper wick = discount (LONG zone)
+            discount_zones.append({**entry, "level": wick_high})
+
+    # Sort nearest-first
+    premium_zones.sort(key=lambda z: z["level"] - current_price)
+    discount_zones.sort(key=lambda z: current_price - z["level"])
+
+    # Deduplicate levels that are within 0.05% of each other (keep nearest)
+    def _dedup(zones: list) -> list:
+        out, seen = [], []
+        for z in zones:
+            if not any(abs(z["level"] - s) / max(abs(s), 1) < 0.0005 for s in seen):
+                out.append(z)
+                seen.append(z["level"])
+        return out
+
+    return {
+        "premium":  _dedup(premium_zones),
+        "discount": _dedup(discount_zones),
+    }
+
+
+# ══════════════════════════════════════════════
 #  RECOMMENDATION ENGINE
 # ══════════════════════════════════════════════
 
@@ -1131,6 +1257,199 @@ def compute_recommendation(mnq_df, mes_df, mnq_levels, mes_levels,
         },
         "weights":  {k: v for k, v in w.items()},
         "reasons":  reasons,
+    }
+
+
+def compute_checklist(mnq_df, mes_df, mnq_levels: dict, mes_levels: dict,
+                      mnq_fvgs: list, mes_fvgs: list,
+                      smt_sigs: list, hidden_smts: list, fill_smts: list,
+                      mnq_ts: dict) -> dict:
+    """
+    5-criteria trade entry checklist (from ICT methodology).
+
+    Criteria (max 90 pts):
+      1. TWO — weekly zone:            10 pts  (below TWO = LONG, above = SHORT)
+      2. TDO — daily zone:             10 pts  (below TDO = LONG, above = SHORT)
+      3. Significant liquidity swept:  40 pts  (bullish sweep = LONG, bearish = SHORT)
+      4. SMT signal:                   20 pts  (LONG/SHORT SMT in current window)
+      5. Time Spell zone touch:        10 pts  (discount zone = LONG, premium = SHORT)
+
+    Returns:
+      {
+        'criteria': [{'id','name','max','long','short','long_pass','short_pass','detail'}, ...],
+        'long_total': int, 'short_total': int, 'max_total': 90,
+        'implied_direction': 'LONG' | 'SHORT' | 'WAIT'
+      }
+    """
+    current = float(mnq_levels.get("CURRENT", 0))
+    tdo     = float(mnq_levels.get("TDO", 0))
+    two     = float(mnq_levels.get("TWO", 0))
+
+    criteria = []
+
+    # ── 1. TWO — weekly zone ──────────────────────────────────────
+    if two and current:
+        long_pass  = current < two
+        short_pass = current > two
+        side   = "Below" if long_pass else "Above"
+        verdict = "→ Long" if long_pass else "→ Short"
+        detail = f"{side} TWO ({two:.2f}) {verdict}"
+    else:
+        long_pass = short_pass = False
+        detail = "TWO not available"
+    criteria.append({
+        "id": 1, "name": "TWO — Weekly zone",
+        "max": 10,
+        "long": 10 if long_pass else 0,
+        "short": 10 if short_pass else 0,
+        "long_pass": long_pass, "short_pass": short_pass,
+        "detail": detail,
+    })
+
+    # ── 2. TDO — daily zone ───────────────────────────────────────
+    if tdo and current:
+        long_pass  = current < tdo
+        short_pass = current > tdo
+        side   = "Below" if long_pass else "Above"
+        verdict = "→ Long" if long_pass else "→ Short"
+        detail = f"{side} TDO ({tdo:.2f}) {verdict}"
+    else:
+        long_pass = short_pass = False
+        detail = "TDO not available"
+    criteria.append({
+        "id": 2, "name": "TDO — Daily zone",
+        "max": 10,
+        "long": 10 if long_pass else 0,
+        "short": 10 if short_pass else 0,
+        "long_pass": long_pass, "short_pass": short_pass,
+        "detail": detail,
+    })
+
+    # ── 3. Significant liquidity swept ───────────────────────────
+    s_liq, liq_reasons = score_liquidity(mnq_df, mnq_levels, mnq_fvgs,
+                                         mes_df, mes_levels, mes_fvgs)
+    LIQ_THRESHOLD = 0.3
+    long_pass  = s_liq >  LIQ_THRESHOLD
+    short_pass = s_liq < -LIQ_THRESHOLD
+    if liq_reasons:
+        detail = ", ".join(liq_reasons[:2])   # up to 2 most relevant
+    elif long_pass:
+        detail = "Bullish sweep → Long"
+    elif short_pass:
+        detail = "Bearish sweep → Short"
+    else:
+        cur = float(mnq_levels.get("CURRENT", 0))
+        pdh = float(mnq_levels.get("PDH", 0))
+        pdl = float(mnq_levels.get("PDL", 0))
+        if pdh and pdl:
+            side = "near PDH" if abs(cur - pdh) < abs(cur - pdl) else "near PDL"
+            detail = f"No sweep — price {side}"
+        else:
+            detail = "No clear liquidity sweep"
+    criteria.append({
+        "id": 3, "name": "Liquidity swept",
+        "max": 40,
+        "long": 40 if long_pass else 0,
+        "short": 40 if short_pass else 0,
+        "long_pass": long_pass, "short_pass": short_pass,
+        "detail": detail,
+    })
+
+    # ── 4. SMT signal ─────────────────────────────────────────────
+    def _smt_label(sig) -> str:
+        t = sig.get("type", "")
+        if "hidden" in t:   kind = "Hidden"
+        elif "fill" in t:   kind = "Fill"
+        else:                kind = "Regular"
+        d = sig.get("direction", "")
+        dir_tag = "Long" if "LONG" in d else "Short"
+        ts = sig.get("time")
+        time_str = ts.strftime("%H:%M") if hasattr(ts, "strftime") else str(ts)[11:16]
+        return f"{kind} SMT {dir_tag} @{time_str}"
+
+    all_sigs  = list(smt_sigs) + list(hidden_smts) + list(fill_smts)
+    long_sigs  = [s for s in all_sigs if "LONG"  in s.get("direction", "")]
+    short_sigs = [s for s in all_sigs if "SHORT" in s.get("direction", "")]
+    long_smt  = bool(long_sigs)
+    short_smt = bool(short_sigs)
+
+    if long_smt and short_smt:
+        parts = [_smt_label(long_sigs[0]), _smt_label(short_sigs[0])]
+        detail = " + ".join(parts)
+    elif long_smt:
+        detail = _smt_label(long_sigs[0])
+        if len(long_sigs) > 1: detail += f" +{len(long_sigs)-1} more"
+    elif short_smt:
+        detail = _smt_label(short_sigs[0])
+        if len(short_sigs) > 1: detail += f" +{len(short_sigs)-1} more"
+    else:
+        detail = "No SMT signal"
+    criteria.append({
+        "id": 4, "name": "SMT signal",
+        "max": 20,
+        "long": 20 if long_smt else 0,
+        "short": 20 if short_smt else 0,
+        "long_pass": long_smt, "short_pass": short_smt,
+        "detail": detail,
+    })
+
+    # ── 5. Time Spell zone touch ─────────────────────────────────
+    TS_TOUCH_PCT   = 0.005   # within 0.5% of zone level
+    discount_zones = mnq_ts.get("discount", [])
+    premium_zones  = mnq_ts.get("premium",  [])
+
+    long_ts = (bool(discount_zones) and current > 0 and
+               abs(discount_zones[0]["level"] - current) / current <= TS_TOUCH_PCT)
+    short_ts = (bool(premium_zones) and current > 0 and
+                abs(premium_zones[0]["level"] - current) / current <= TS_TOUCH_PCT)
+
+    def _ts_desc(z) -> str:
+        mt = z.get("match_type", "")
+        label = "same-session" if mt == "same-day family" else mt
+        return f"Q{z['quarter']} {z['weekday']} ({label})"
+
+    if long_ts:
+        z = discount_zones[0]
+        detail = f"Discount @{z['level']:.2f} — {_ts_desc(z)}"
+    elif short_ts:
+        z = premium_zones[0]
+        detail = f"Premium @{z['level']:.2f} — {_ts_desc(z)}"
+    elif discount_zones or premium_zones:
+        parts = []
+        if discount_zones:
+            z = discount_zones[0]
+            parts.append(f"Long: {z['level']:.2f} ({_ts_desc(z)})")
+        if premium_zones:
+            z = premium_zones[0]
+            parts.append(f"Short: {z['level']:.2f} ({_ts_desc(z)})")
+        detail = " | ".join(parts)
+    else:
+        detail = "No time spell zones found"
+    criteria.append({
+        "id": 5, "name": "Time Spell touch",
+        "max": 10,
+        "long": 10 if long_ts else 0,
+        "short": 10 if short_ts else 0,
+        "long_pass": long_ts, "short_pass": short_ts,
+        "detail": detail,
+    })
+
+    long_total  = sum(c["long"]  for c in criteria)
+    short_total = sum(c["short"] for c in criteria)
+    max_total   = sum(c["max"]   for c in criteria)   # 90
+
+    # Implied direction: need ≥50% of max_total to qualify
+    threshold = max_total * 0.5
+    if   long_total  >= threshold and long_total  > short_total: implied = "LONG"
+    elif short_total >= threshold and short_total > long_total:  implied = "SHORT"
+    else:                                                         implied = "WAIT"
+
+    return {
+        "criteria":          criteria,
+        "long_total":        long_total,
+        "short_total":       short_total,
+        "max_total":         max_total,
+        "implied_direction": implied,
     }
 
 

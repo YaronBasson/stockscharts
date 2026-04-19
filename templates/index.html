@@ -70,6 +70,11 @@
   #smt-alert-body .val { color:#e6edf3; font-weight:600; }
   #smt-alert-body .val.swept { color:#ffa657; }
 
+  /* ── checklist ── */
+  #rec-checklist .cl-pass-long  { color: #3fb950; }
+  #rec-checklist .cl-pass-short { color: #f85149; }
+  #rec-checklist .cl-miss       { color: #3d3d3d; }
+
   /* ── status bar ── */
   #statusbar { font-size:.72rem; color:#8b949e; padding:4px 16px; background:#0d1117; border-top:1px solid #21262d; flex-shrink:0; }
 
@@ -271,12 +276,12 @@
     </div>
   </div>
 
-  <!-- bottom data row — 4 columns: Quarters | Levels | SMT+FVG | Trade Rec -->
+  <!-- bottom data row — 3 columns: Quarters+Levels | SMT+FVG | Trade Rec -->
   <div class="row g-3 data-row">
 
-    <!-- Quarters table -->
-    <div class="col-3">
-      <div class="tbl-card h-100">
+    <!-- Quarters + Levels stacked in one column -->
+    <div class="col-3" style="display:flex; flex-direction:column; gap:5px;">
+      <div class="tbl-card" style="flex:0 0 auto; height:auto !important;">
         <div class="card-header">Quarters (IL)</div>
         <div class="table-responsive">
           <table class="table table-sm table-hover mb-0" id="tbl-quarters">
@@ -289,13 +294,9 @@
           </table>
         </div>
       </div>
-    </div>
-
-    <!-- Levels table -->
-    <div class="col-2">
-      <div class="tbl-card h-100">
+      <div class="tbl-card" style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; height:auto !important;">
         <div class="card-header">Levels</div>
-        <div class="table-responsive">
+        <div class="table-responsive" style="flex:1; min-height:0; overflow-y:auto;">
           <table class="table table-sm table-hover mb-0" id="tbl-levels">
             <thead><tr>
               <th>Label</th>
@@ -333,62 +334,86 @@
           </table>
         </div>
       </div>
+
+      <div class="tbl-card" id="ts-card">
+        <div class="card-header d-flex align-items-center gap-2">
+          Time Spells ✦
+          <span class="text-secondary ms-auto" style="font-size:.65rem">כישופי זמן</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0" id="tbl-ts">
+            <thead>
+              <tr>
+                <th>Dir</th>
+                <th class="text-end">MNQ lvl</th>
+                <th class="text-end">MES lvl</th>
+                <th>Q</th>
+                <th>Day</th>
+                <th>Type</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- Trade Recommendation — right column -->
-    <div class="col-4" id="rec-col" style="display:none">
+    <div class="col-6" id="rec-col" style="display:none">
       <div id="rec-panel" style="height:100%; overflow:hidden; display:flex; flex-direction:column;">
         <div class="card-header d-flex align-items-center gap-2" style="flex-shrink:0">
           Trade Rec
           <span id="rec-quarter-info" class="ms-auto text-secondary" style="font-size:.68rem"></span>
         </div>
-        <div style="flex:1; min-height:0; overflow-y:auto; padding:8px 10px;">
+        <div style="flex:1; min-height:0; overflow-y:auto; padding:4px 8px 8px 8px;">
 
           <!-- Action + strength + score (one compact line) -->
-          <div class="d-flex align-items-center gap-2 mb-2">
+          <div class="d-flex align-items-center gap-2 mb-1">
             <div id="rec-action-badge">—</div>
             <div id="rec-strength"></div>
             <div class="text-secondary ms-auto" style="font-size:.7rem">Score: <span id="rec-score-val">—</span></div>
           </div>
 
-          <!-- Factor bars: 2×2 grid -->
-          <div class="row g-1 mb-2">
-            <div class="col-6">
-              <div class="text-secondary" style="font-size:.68rem">Liquidity <span id="rec-liq-w" class="text-muted"></span></div>
-              <div class="rec-score-bar"><div id="rec-liq-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-              <div id="rec-liq-val" class="text-secondary" style="font-size:.68rem">—</div>
+          <!-- Factor bars: 2 per row -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:3px 10px; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:4px; min-width:0;">
+              <span style="width:32px; font-size:.6rem; color:#8b949e; flex-shrink:0; white-space:nowrap;">Liq</span>
+              <div class="rec-score-bar" style="flex:1; min-width:0;"><div id="rec-liq-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <span id="rec-liq-val" style="width:38px; text-align:right; font-size:.6rem; color:#8b949e; flex-shrink:0;">—</span>
             </div>
-            <div class="col-6">
-              <div class="text-secondary" style="font-size:.68rem">SMT <span id="rec-smt-w" class="text-muted"></span></div>
-              <div class="rec-score-bar"><div id="rec-smt-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-              <div id="rec-smt-val" class="text-secondary" style="font-size:.68rem">—</div>
+            <div style="display:flex; align-items:center; gap:4px; min-width:0;">
+              <span style="width:32px; font-size:.6rem; color:#8b949e; flex-shrink:0; white-space:nowrap;">SMT</span>
+              <div class="rec-score-bar" style="flex:1; min-width:0;"><div id="rec-smt-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <span id="rec-smt-val" style="width:38px; text-align:right; font-size:.6rem; color:#8b949e; flex-shrink:0;">—</span>
             </div>
-            <div class="col-6">
-              <div class="text-secondary" style="font-size:.68rem">TDO/TWO <span id="rec-tdo-w" class="text-muted"></span></div>
-              <div class="rec-score-bar"><div id="rec-tdo-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-              <div id="rec-tdo-val" class="text-secondary" style="font-size:.68rem">—</div>
+            <div style="display:flex; align-items:center; gap:4px; min-width:0;">
+              <span style="width:32px; font-size:.6rem; color:#8b949e; flex-shrink:0; white-space:nowrap;">TDO</span>
+              <div class="rec-score-bar" style="flex:1; min-width:0;"><div id="rec-tdo-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <span id="rec-tdo-val" style="width:38px; text-align:right; font-size:.6rem; color:#8b949e; flex-shrink:0;">—</span>
             </div>
-            <div class="col-6">
-              <div class="text-secondary" style="font-size:.68rem">MNQ Div <span id="rec-div-w" class="text-muted"></span></div>
-              <div class="rec-score-bar"><div id="rec-div-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-              <div id="rec-div-val" class="text-secondary" style="font-size:.68rem">—</div>
+            <div style="display:flex; align-items:center; gap:4px; min-width:0;">
+              <span style="width:32px; font-size:.6rem; color:#8b949e; flex-shrink:0; white-space:nowrap;">Div</span>
+              <div class="rec-score-bar" style="flex:1; min-width:0;"><div id="rec-div-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <span id="rec-div-val" style="width:38px; text-align:right; font-size:.6rem; color:#8b949e; flex-shrink:0;">—</span>
             </div>
-          </div>
-          <div class="row g-1 mb-2">
-            <div class="col-12">
-              <div class="text-secondary" style="font-size:.68rem">Quarter ×</div>
-              <div class="rec-score-bar"><div id="rec-q-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
-              <div id="rec-q-val" class="text-secondary" style="font-size:.68rem">—</div>
+            <div style="display:flex; align-items:center; gap:4px; min-width:0; grid-column:1/-1;">
+              <span style="width:32px; font-size:.6rem; color:#8b949e; flex-shrink:0; white-space:nowrap;">Qtr ×</span>
+              <div class="rec-score-bar" style="flex:1; min-width:0;"><div id="rec-q-bar" class="rec-score-fill-neu" style="width:0%"></div></div>
+              <span id="rec-q-val" style="width:38px; text-align:right; font-size:.6rem; color:#8b949e; flex-shrink:0;">—</span>
             </div>
           </div>
+          <!-- hidden weight spans so setBar() doesn't error -->
+          <span id="rec-liq-w" style="display:none"></span>
+          <span id="rec-smt-w" style="display:none"></span>
+          <span id="rec-tdo-w" style="display:none"></span>
+          <span id="rec-div-w" style="display:none"></span>
 
-          <!-- Analysis reasons -->
-          <div class="text-secondary mb-1" style="font-size:.68rem">Analysis</div>
-          <ul id="rec-reasons" class="list-unstyled mb-2" style="font-size:.68rem"></ul>
+          <!-- Analysis reasons — hidden, kept for JS compat -->
+          <ul id="rec-reasons" class="list-unstyled" style="display:none;"></ul>
 
           <!-- Trade Plan -->
-          <div id="rec-trade-plan" style="display:none; border-top:1px solid #30363d; padding-top:8px">
-            <div class="text-secondary mb-1" style="font-size:.68rem">Trade Plan (MNQ)</div>
+          <div id="rec-trade-plan" style="display:none; border-top:1px solid #30363d; padding-top:4px; margin-top:4px">
+            <div class="text-secondary mb-1" style="font-size:.65rem; font-weight:600; letter-spacing:.03em;">Trade Plan (MNQ)</div>
             <table style="width:100%; font-size:.72rem; font-family:monospace; border-collapse:collapse">
               <thead>
                 <tr style="color:#8b949e; font-size:.65rem">
@@ -401,6 +426,36 @@
               </thead>
               <tbody id="rec-trade-tbody"></tbody>
             </table>
+          </div>
+
+          <!-- Entry Checklist -->
+          <div id="rec-checklist" style="display:none; border-top:1px solid #30363d; padding-top:4px; margin-top:4px">
+            <div class="d-flex align-items-center mb-1 gap-2">
+              <span class="text-secondary" style="font-size:.65rem; font-weight:600; letter-spacing:.03em;">Entry Checklist</span>
+              <span style="font-size:.58rem; color:#555">הצ׳קליסט לכניסה לעסקה</span>
+            </div>
+            <table style="width:100%; font-size:.7rem; border-collapse:collapse" id="cl-table">
+              <colgroup>
+                <col style="width:auto">
+                <col style="width:24px">
+                <col style="width:32px">
+                <col style="width:32px">
+              </colgroup>
+              <tbody id="checklist-tbody"></tbody>
+            </table>
+
+            <!-- Score row: LONG bar | SHORT bar | implied — all on one line -->
+            <div style="display:flex; align-items:center; gap:5px; margin-top:5px; padding-top:4px; border-top:1px solid #21262d;">
+              <span style="font-size:.6rem; color:#3fb950; flex-shrink:0;">▲</span>
+              <div class="rec-score-bar" style="flex:1; min-width:0;"><div id="cl-long-bar" class="rec-score-fill-pos" style="width:0%"></div></div>
+              <span id="cl-long-total" style="font-size:.6rem; color:#3fb950; flex-shrink:0; min-width:30px; text-align:right;">0/90</span>
+              <span style="font-size:.6rem; color:#333; flex-shrink:0; padding:0 2px;">|</span>
+              <span style="font-size:.6rem; color:#f85149; flex-shrink:0;">▼</span>
+              <div class="rec-score-bar" style="flex:1; min-width:0;"><div id="cl-short-bar" class="rec-score-fill-neg" style="width:0%"></div></div>
+              <span id="cl-short-total" style="font-size:.6rem; color:#f85149; flex-shrink:0; min-width:30px; text-align:right;">0/90</span>
+              <span style="font-size:.6rem; color:#555; flex-shrink:0; padding:0 2px;">→</span>
+              <span id="cl-implied" style="font-size:.85rem; font-weight:700; flex-shrink:0; min-width:40px; text-align:right;">—</span>
+            </div>
           </div>
 
         </div>
@@ -709,7 +764,7 @@ function clearChartsZoom() {
   chartWasDefault['chart-mes'] = true;
 }
 
-async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice, ticker, hiddenSmts = [], fillSmts = []) {
+async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice, ticker, hiddenSmts = [], fillSmts = [], timeSpells = {}) {
   const zoom = chartWasDefault[divId] ? null : savedZoom(divId);   // null = auto-range
   if (candles.length) chartLatestTime[divId] = candles[candles.length - 1].t;
   const ts   = candles.map(c => c.t);
@@ -857,6 +912,32 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
     }
   }
 
+  // ── Time Spell zones ─────────────────────────────────────────
+  // Premium zones (SHORT) = dashed red; Discount zones (LONG) = dashed green
+  const tsShapes      = [];
+  const tsAnnotations = [];
+
+  function _addTsZone(zones, color, side) {
+    zones.forEach(z => {
+      tsShapes.push({
+        type:'line', xref:'paper', yref:'y',
+        x0:0, x1:1, y0: z.level, y1: z.level,
+        line:{ color, width:1, dash:'dot' },
+      });
+      const label = `✦ TS ${side} Q${z.quarter} ${z.weekday}`;
+      tsAnnotations.push({
+        xref:'paper', yref:'y',
+        x:0, y: z.level,
+        xanchor:'right', yanchor:'middle',
+        text: label,
+        showarrow: false,
+        font:{ color, size:9, family:'monospace' },
+      });
+    });
+  }
+  _addTsZone(timeSpells.premium  || [], '#f0883e', 'SHORT');   // orange-red for premium
+  _addTsZone(timeSpells.discount || [], '#58d68d', 'LONG');    // green for discount
+
   const layout = {
     template:'plotly_dark',
     paper_bgcolor:'#161b22',
@@ -881,8 +962,8 @@ async function buildChart(divId, candles, levels, fvgs, smtSignals, currentPrice
       tickformat:',.0f',
       side:'left',
     },
-    shapes:[...quarterShapes, ...levelShapes, ...fvgShapes, ...fillSmtFvgShapes, ...hiddenRefShapes],
-    annotations:[...quarterAnnotations, ...levelAnnotations, ...smtAnnotations, ...hiddenRefAnnotations, priceAnnotation],
+    shapes:[...quarterShapes, ...levelShapes, ...fvgShapes, ...fillSmtFvgShapes, ...hiddenRefShapes, ...tsShapes],
+    annotations:[...quarterAnnotations, ...levelAnnotations, ...smtAnnotations, ...hiddenRefAnnotations, ...tsAnnotations, priceAnnotation],
     font:{family:'Segoe UI, system-ui, sans-serif', color:'#e6edf3'},
     hovermode: false,
   };
@@ -1254,6 +1335,51 @@ function renderFvgs(mnqFvgs, mesFvgs) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   Time Spells table
+════════════════════════════════════════════════════════════════ */
+function renderTimeSpells(mnqTs, mesTs) {
+  const tbody = document.querySelector('#tbl-ts tbody');
+  tbody.innerHTML = '';
+
+  // Merge MNQ premium and MES premium (and discounts) into unified rows
+  // Strategy: pair up by index — show nearest 5 premium + 5 discount
+  const premiumMnq  = (mnqTs.premium  || []).slice(0, 5);
+  const discountMnq = (mnqTs.discount || []).slice(0, 5);
+  const premiumMes  = (mesTs.premium  || []).slice(0, 5);
+  const discountMes = (mesTs.discount || []).slice(0, 5);
+
+  const maxRows = Math.max(premiumMnq.length, premiumMes.length,
+                           discountMnq.length, discountMes.length);
+  if (maxRows === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-secondary text-center">No time spells for current quarter</td></tr>';
+    return;
+  }
+
+  // Show premium rows (SHORT) first, then discount (LONG)
+  function addRows(mnqArr, mesArr, dir, color) {
+    const n = Math.max(mnqArr.length, mesArr.length);
+    for (let i = 0; i < n; i++) {
+      const m = mnqArr[i];
+      const s = mesArr[i];
+      const ref = m || s;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="color:${color};font-weight:600">${dir}</td>
+        <td class="text-end" style="color:${color}">${m ? m.level.toFixed(2) : '—'}</td>
+        <td class="text-end" style="color:${color}">${s ? s.level.toFixed(2) : '—'}</td>
+        <td style="color:#8b949e;font-size:.68rem">Q${ref.quarter}</td>
+        <td style="color:#8b949e;font-size:.68rem">${ref.weekday}</td>
+        <td style="color:#8b949e;font-size:.65rem">${ref.match_type}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  addRows(premiumMnq,  premiumMes,  '▼ SHORT', '#f0883e');
+  addRows(discountMnq, discountMes, '▲ LONG',  '#58d68d');
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Recommendation panel
 ════════════════════════════════════════════════════════════════ */
 function renderRecommendation(rec, quarter, levels, current, mnqFvgs = [], mesFvgs = []) {
@@ -1320,17 +1446,38 @@ function renderRecommendation(rec, quarter, levels, current, mnqFvgs = [], mesFv
   qVal.textContent = `×${qMult.toFixed(2)}`;
   qVal.style.color = qMult >= 1.0 ? '#3fb950' : '#ffa657';
 
-  // Reasons
+  // Reasons (show up to 3; rest collapsed)
   const ul = document.getElementById('rec-reasons');
   ul.innerHTML = '';
-  for (const r of (rec.reasons || [])) {
+  const reasons = rec.reasons || [];
+  const visibleReasons = reasons.slice(0, 3);
+  const hiddenCount    = reasons.length - visibleReasons.length;
+  for (const r of visibleReasons) {
     const li = document.createElement('li');
     li.className = 'rec-reason' + (r.startsWith('✅') || r.startsWith('▲') ? ' pos'
                                   : r.startsWith('❌') || r.startsWith('▼') ? ' neg' : '');
     li.textContent = r;
     ul.appendChild(li);
   }
-  if (!rec.reasons || !rec.reasons.length) {
+  if (hiddenCount > 0) {
+    const li = document.createElement('li');
+    li.className = 'rec-reason';
+    li.style.color = '#555';
+    li.style.cursor = 'pointer';
+    li.textContent = `+ ${hiddenCount} more…`;
+    li.onclick = () => {
+      for (const r of reasons.slice(3)) {
+        const extra = document.createElement('li');
+        extra.className = 'rec-reason' + (r.startsWith('✅') || r.startsWith('▲') ? ' pos'
+                                         : r.startsWith('❌') || r.startsWith('▼') ? ' neg' : '');
+        extra.textContent = r;
+        ul.insertBefore(extra, li);
+      }
+      li.remove();
+    };
+    ul.appendChild(li);
+  }
+  if (!reasons.length) {
     ul.innerHTML = '<li class="rec-reason text-secondary">No analysis available</li>';
   }
 
@@ -1454,6 +1601,66 @@ function renderRecommendation(rec, quarter, levels, current, mnqFvgs = [], mesFv
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   Entry Checklist
+════════════════════════════════════════════════════════════════ */
+function renderChecklist(checklist) {
+  const div = document.getElementById('rec-checklist');
+  if (!checklist || !checklist.criteria || !checklist.criteria.length) {
+    div.style.display = 'none';
+    return;
+  }
+  div.style.display = 'block';
+
+  const tbody = document.getElementById('checklist-tbody');
+  tbody.innerHTML = '';
+
+  const CL_SHORT = {
+    'TWO — Weekly zone': 'TWO',
+    'TDO — Daily zone':  'TDO',
+    'Liquidity swept':   'Liquidity',
+    'SMT signal':        'SMT',
+    'Time Spell touch':  'Time Spell',
+  };
+
+  for (const c of checklist.criteria) {
+    const tr = document.createElement('tr');
+    tr.style.borderTop = '1px solid #1e2429';
+
+    const longScore  = c.long  > 0 ? `<b style="color:#3fb950">${c.long}</b>`  : `<span style="color:#3a3a3a">—</span>`;
+    const shortScore = c.short > 0 ? `<b style="color:#f85149">${c.short}</b>` : `<span style="color:#3a3a3a">—</span>`;
+    const lineColor  = c.long_pass ? '#3fb950' : c.short_pass ? '#f85149' : '#8b949e';
+    const shortName  = CL_SHORT[c.name] || c.name;
+    const lineText   = `${shortName} — ${c.detail}`;
+
+    tr.innerHTML = `
+      <td style="padding:2px 4px 2px 0; max-width:0; overflow:hidden;">
+        <div style="color:${lineColor}; font-size:.62rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${lineText}">${lineText}</div>
+      </td>
+      <td style="padding:2px 4px; text-align:center; color:#444; font-size:.6rem; vertical-align:middle;">${c.max}</td>
+      <td style="padding:2px 4px; text-align:center; font-size:.7rem; vertical-align:middle;">${longScore}</td>
+      <td style="padding:2px 0;  text-align:center; font-size:.7rem; vertical-align:middle;">${shortScore}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  const maxTotal   = checklist.max_total   || 90;
+  const longTotal  = checklist.long_total  || 0;
+  const shortTotal = checklist.short_total || 0;
+  const implied    = checklist.implied_direction || 'WAIT';
+
+  document.getElementById('cl-long-bar').style.width  = `${(longTotal  / maxTotal * 100).toFixed(1)}%`;
+  document.getElementById('cl-short-bar').style.width = `${(shortTotal / maxTotal * 100).toFixed(1)}%`;
+  document.getElementById('cl-long-total').textContent  = `${longTotal}/${maxTotal}`;
+  document.getElementById('cl-short-total').textContent = `${shortTotal}/${maxTotal}`;
+
+  const implEl = document.getElementById('cl-implied');
+  implEl.textContent = implied;
+  implEl.style.color = implied === 'LONG'  ? '#3fb950'
+                     : implied === 'SHORT' ? '#f85149'
+                     : '#ffa657';
+}
+
+/* ═══════════════════════════════════════════════════════════════
    API + render pipeline
 ════════════════════════════════════════════════════════════════ */
 async function loadData() {
@@ -1531,9 +1738,11 @@ async function render(data) {
   // build both charts (await so listeners attach before user can interact)
   await Promise.all([
     buildChart('chart-mnq', data.mnq.candles, data.mnq.levels, data.mnq.fvgs,
-      data.smt_signals, data.mnq.current, 'MNQ', data.hidden_smts || [], data.fill_smts || []),
+      data.smt_signals, data.mnq.current, 'MNQ', data.hidden_smts || [], data.fill_smts || [],
+      data.mnq.time_spells || {}),
     buildChart('chart-mes', data.mes.candles, data.mes.levels, data.mes.fvgs,
-      data.smt_signals, data.mes.current, 'MES', data.hidden_smts || [], data.fill_smts || []),
+      data.smt_signals, data.mes.current, 'MES', data.hidden_smts || [], data.fill_smts || [],
+      data.mes.time_spells || {}),
   ]);
 
   // tables
@@ -1541,7 +1750,9 @@ async function render(data) {
   renderLevels(data.mnq.levels, data.mes.levels, data.mnq.current, data.mes.current);
   renderSmt(data.active_signals || []);
   renderFvgs(data.mnq.fvgs, data.mes.fvgs);
+  renderTimeSpells(data.mnq.time_spells || {}, data.mes.time_spells || {});
   renderRecommendation(data.recommendation, data.quarter, data.mnq.levels, data.mnq.current, data.mnq.fvgs || [], data.mes.fvgs || []);
+  renderChecklist(data.checklist || null);
   updateAlertBtn(data);
 }
 
